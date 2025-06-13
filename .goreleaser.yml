@@ -1,6 +1,7 @@
 project_name: openmorph
 builds:
   - main: ./main.go
+    binary: openmorph
     goos:
       - linux
       - darwin
