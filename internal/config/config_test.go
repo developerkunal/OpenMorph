@@ -6,12 +6,12 @@ import (
 )
 
 func TestLoadConfig_FileAndInline(t *testing.T) {
-	f := "testcfg.yaml"
-	if err := os.WriteFile(f, []byte("input: foo\nmappings:\n  x-a: x-b\n"), 0644); err != nil {
+	f := "test.yaml"
+	if err := os.WriteFile(f, []byte("input: bar\nmappings:\n  x-a: x-b\n  x-c: x-d\n"), 0644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)
-	cfg, err := LoadConfig(f, []string{"x-c=x-d"}, "bar")
+	cfg, err := LoadConfig(f, nil, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestLoadConfig_RC(t *testing.T) {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)
-	cfg, err := LoadConfig("", nil, "")
+	cfg, err := LoadConfig("", nil, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestLoadConfig_RC(t *testing.T) {
 }
 
 func TestLoadConfig_Required(t *testing.T) {
-	_, err := LoadConfig("", nil, "")
+	_, err := LoadConfig("", nil, "", false)
 	if err == nil {
 		t.Error("expected error for missing input")
 	}

@@ -39,7 +39,7 @@ func Dir(dir string, opts Options) ([]string, error) {
 			return nil
 		}
 		allFiles = append(allFiles, path)
-		if isYAML(path) || isJSON(path) {
+		if IsYAML(path) || IsJSON(path) {
 			ok, err := FileWithChanges(path, opts, &dryRunChanges)
 			if err != nil {
 				return err
@@ -70,7 +70,7 @@ func FileWithChanges(path string, opts Options, changes *[]KeyChange) (bool, err
 	if err != nil {
 		return false, err
 	}
-	if isJSON(path) {
+	if IsJSON(path) {
 		patched, changed := patchJSONKeysWithChanges(orig, opts, path, changes)
 		if opts.DryRun {
 			return changed, nil
@@ -310,14 +310,16 @@ func printNoMatchBlock(c KeyChange) {
 	fmt.Printf("\033[1;32m+ (no matching block found for key %s)\033[0m\n", c.NewKey)
 }
 
-func isYAML(path string) bool {
-	l := strings.ToLower(path)
-	return strings.HasSuffix(l, ".yaml") || strings.HasSuffix(l, ".yml")
+// Exported extension helpers for reuse in cmd/root.go
+// IsYAML returns true if the file has a .yaml or .yml extension.
+func IsYAML(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".yaml" || ext == ".yml"
 }
 
-func isJSON(path string) bool {
-	l := strings.ToLower(path)
-	return strings.HasSuffix(l, ".json")
+// IsJSON returns true if the file has a .json extension.
+func IsJSON(path string) bool {
+	return strings.ToLower(filepath.Ext(path)) == ".json"
 }
 
 func equalBytes(a, b []byte) bool {

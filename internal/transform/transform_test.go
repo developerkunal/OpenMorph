@@ -17,11 +17,11 @@ func TestShouldExclude(t *testing.T) {
 }
 
 func TestIsYAMLJSON(t *testing.T) {
-	if !isYAML("foo.yaml") || !isYAML("foo.yml") {
-		t.Error("isYAML failed")
+	if !IsYAML("foo.yaml") || !IsYAML("foo.yml") {
+		t.Error("IsYAML failed")
 	}
-	if !isJSON("foo.json") {
-		t.Error("isJSON failed")
+	if !IsJSON("foo.json") {
+		t.Error("IsJSON failed")
 	}
 }
 

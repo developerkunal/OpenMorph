@@ -40,7 +40,7 @@ var rootCmd = &cobra.Command{
 			return
 		}
 		fmt.Printf("[DEBUG] backup flag value at start of Run: %v\n", backup)
-		cfg, err := config.LoadConfigWithNoConfig(configFile, inlineMaps, inputDir, noConfig)
+		cfg, err := config.LoadConfig(configFile, inlineMaps, inputDir, noConfig)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Config error:", err)
 			os.Exit(1)
@@ -77,7 +77,7 @@ var rootCmd = &cobra.Command{
 				if info.IsDir() {
 					return nil
 				}
-				if isYAML(path) || isJSON(path) {
+				if transform.IsYAML(path) || transform.IsJSON(path) {
 					inputFiles = append(inputFiles, path)
 				}
 				return nil
@@ -234,26 +234,6 @@ func Execute() {
 	}
 }
 
-// Use transform's isYAML/isJSON helpers
-var isYAML = transformIsYAML
-var isJSON = transformIsJSON
-
-func transformIsYAML(path string) bool {
-	return transformIsHelper(path, ".yaml", ".yml")
-}
-func transformIsJSON(path string) bool {
-	return transformIsHelper(path, ".json")
-}
-func transformIsHelper(path string, exts ...string) bool {
-	l := path
-	for _, ext := range exts {
-		if len(l) >= len(ext) && l[len(l)-len(ext):] == ext {
-			return true
-		}
-	}
-	return false
-}
-
 // runSwaggerValidate shells out to swagger-cli validate for all YAML/JSON files in the input dir
 func runSwaggerValidate(inputDir string) error {
 	files := []string{}
@@ -264,7 +244,7 @@ func runSwaggerValidate(inputDir string) error {
 		if d.IsDir() {
 			return nil
 		}
-		if isYAML(path) || isJSON(path) {
+		if transform.IsYAML(path) || transform.IsJSON(path) {
 			files = append(files, path)
 		}
 		return nil
