@@ -1,0 +1,8 @@
+input: ./openapi
+backup: true
+validate: true
+exclude:
+  - x-ignore
+mappings:
+  x-operation-group-name: x-fern-sdk-group-name
+  x-tag: x-fern-tag

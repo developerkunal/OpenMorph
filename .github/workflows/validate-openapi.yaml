@@ -1,0 +1,21 @@
+name: Validate OpenAPI Specs
+
+on:
+  pull_request:
+    paths:
+      - "openapi/**.yaml"
+      - "mapping.yaml"
+
+jobs:
+  transform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.21
+      - name: Build tool
+        run: go build -o transform-openapi ./cmd
+      - name: Run transformation
+        run: ./transform-openapi --input ./openapi --config mapping.yaml --dry-run --validate

@@ -1,0 +1,59 @@
+package config
+
+import (
+	"os"
+	"testing"
+)
+
+func TestLoadConfig_FileAndInline(t *testing.T) {
+	f := "testcfg.yaml"
+	if err := os.WriteFile(f, []byte("input: foo\nmappings:\n  x-a: x-b\n"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	defer os.Remove(f)
+	cfg, err := LoadConfig(f, []string{"x-c=x-d"}, "bar")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Input != "bar" {
+		t.Errorf("input override failed: %v", cfg.Input)
+	}
+	if cfg.Mappings["x-a"] != "x-b" || cfg.Mappings["x-c"] != "x-d" {
+		t.Errorf("mappings merge failed: %+v", cfg.Mappings)
+	}
+}
+
+func TestLoadConfig_RC(t *testing.T) {
+	f := ".openapirc.yaml"
+	cfgYaml := "input: foo\nmappings:\n  x-a: x-b\n"
+	if err := os.WriteFile(f, []byte(cfgYaml), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	defer os.Remove(f)
+	cfg, err := LoadConfig("", nil, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Input != "foo" {
+		t.Errorf("rc input failed: %v", cfg.Input)
+	}
+	if cfg.Mappings["x-a"] != "x-b" {
+		t.Errorf("rc mappings failed: %+v", cfg.Mappings)
+	}
+}
+
+func TestLoadConfig_Required(t *testing.T) {
+	_, err := LoadConfig("", nil, "")
+	if err == nil {
+		t.Error("expected error for missing input")
+	}
+}
+
+func TestSplitMap(t *testing.T) {
+	if got := splitMap("foo=bar"); got[0] != "foo" || got[1] != "bar" {
+		t.Errorf("splitMap failed: %v", got)
+	}
+	if splitMap("foobar") != nil {
+		t.Error("expected nil for invalid map")
+	}
+}

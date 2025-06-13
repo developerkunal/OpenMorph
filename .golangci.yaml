@@ -1,0 +1,109 @@
+# GolangCI-Lint v2.x configuration (clean, no deprecated options)
+# See: https://golangci-lint.run/usage/configuration/
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  dupl:
+    threshold: 100
+  errcheck:
+    check-type-assertions: true
+  staticcheck:
+    checks: [all]
+  revive:
+    confidence: 0.8
+    severity: warning
+    rules:
+      - name: var-naming
+      - name: indent-error-flow
+      - name: error-naming
+      - name: if-return
+      - name: import-shadowing
+      - name: range-val-address
+      - name: time-naming
+      - name: unexported-return
+      - name: unused-parameter
+      - name: unused-receiver
+      - name: var-declaration
+      - name: exported
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: error-strings
+      - name: error-return
+      - name: errorf
+      - name: function-length
+  gofmt:
+    simplify: true
+  misspell:
+    locale: US
+
+run:
+  timeout: 5m
+  tests: true
+  issues-exit-code: 1
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+
+issues:
+  exclude-dirs:
+    - dist
+    - vendor
+    - .git
+    - .github
+    - .vscode
+    - .idea
+    - node_modules
+    - testdata
+  exclude-files:
+    - ".*_gen.go$"
+    - ".*_mock.go$"
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - revive
+    - gofmt
+    - misspell
+    - gocyclo
+    - dupl
+  disable:
+    - godox
+    - lll
+    - funlen
+    - wsl
+    - dogsled
+    - goconst
+    - gocritic
+    - gosec
+    - depguard
+    - unparam
+    - nakedret
+    - prealloc
+    - exhaustive
+    - nestif
+    - goprintffuncname
+    - gocognit
+    - cyclop
+    - bodyclose
+    - asasalint
+    - nlreturn
+    - noctx
+    - rowserrcheck
+    - stylecheck
+    - typecheck
+    - unused
+    - whitespace
+    - wrapcheck
+    - forbidigo
+    - gci
+    - goheader
+    - nolintlint
+    - paralleltest
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - wastedassign
