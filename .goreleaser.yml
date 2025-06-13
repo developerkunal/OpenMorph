@@ -26,5 +26,5 @@ changelog:
       - "^test:"
 release:
   github:
-    owner: kunal-dawar
+    owner: developerkunal
     name: OpenMorph
