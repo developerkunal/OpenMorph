@@ -22,6 +22,7 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 - Config file and CLI flag merging
 - Exclude keys from transformation
 - OpenAPI validation integration
+- **Pagination priority support** - Remove lower-priority pagination strategies
 - Modern, maintainable Go codebase
 
 ## Credits / Acknowledgements
@@ -33,8 +34,47 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 
 ## Installation
 
+### Package Managers (Recommended)
+
+#### Homebrew (macOS/Linux)
+```bash
+# Add the tap
+brew tap developerkunal/openmorph
+
+# Install OpenMorph
+brew install openmorph
 ```
+
+#### Scoop (Windows)
+```powershell
+# Add the bucket
+scoop bucket add openmorph https://github.com/developerkunal/scoop-openmorph
+
+# Install OpenMorph
+scoop install openmorph
+```
+
+### From Source
+
+#### Prerequisites
+- Go 1.24 or later
+
+#### Build from source
+```bash
+# Clone the repository
+git clone https://github.com/developerkunal/OpenMorph.git
+cd OpenMorph
+
+# Build the binary
+make build
+# or
 go build -o openmorph main.go
+```
+
+#### Install from source
+```bash
+# Build and install to GOPATH/bin
+make install
 ```
 
 ## Usage
@@ -45,19 +85,20 @@ openmorph [flags]
 
 ### Flags and Options
 
-| Flag            | Description                                                                            |
-| --------------- | -------------------------------------------------------------------------------------- |
-| `--input`       | Path to the input directory or file (YAML/JSON). Required.                             |
-| `--mapping`     | Key mapping(s) in the form `old=new`. Can be specified multiple times.                 |
-| `--exclude`     | Key(s) to exclude from transformation. Can be specified multiple times.                |
-| `--dry-run`     | Show a preview of changes (with colorized before/after diffs) without modifying files. |
-| `--backup`      | Create `.bak` backup files before modifying originals.                                 |
-| `--interactive` | Launch an interactive TUI for reviewing and approving changes before applying them.    |
-| `--config`      | Path to a YAML/JSON config file with mappings/excludes.                                |
-| `--no-config`   | Ignore all config files and use only CLI flags.                                        |
-| `--validate`    | Run OpenAPI validation (requires `swagger-cli` in PATH).                               |
-| `--version`     | Show version and exit.                                                                 |
-| `-h`, `--help`  | Show help message.                                                                     |
+| Flag                    | Description                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| `--input`               | Path to the input directory or file (YAML/JSON). Required.                             |
+| `--mapping`             | Key mapping(s) in the form `old=new`. Can be specified multiple times.                 |
+| `--exclude`             | Key(s) to exclude from transformation. Can be specified multiple times.                |
+| `--dry-run`             | Show a preview of changes (with colorized before/after diffs) without modifying files. |
+| `--backup`              | Create `.bak` backup files before modifying originals.                                 |
+| `--interactive`         | Launch an interactive TUI for reviewing and approving changes before applying them.    |
+| `--config`              | Path to a YAML/JSON config file with mappings/excludes.                                |
+| `--no-config`           | Ignore all config files and use only CLI flags.                                        |
+| `--validate`            | Run OpenAPI validation (requires `swagger-cli` in PATH).                               |
+| `--pagination-priority` | Pagination strategy priority order (e.g., checkpoint,offset,page,cursor,none).         |
+| `--version`             | Show version and exit.                                                                 |
+| `-h`, `--help`          | Show help message.                                                                     |
 
 ### Example: Basic CLI Usage
 
@@ -99,6 +140,12 @@ mappings:
   x-baz: x-qux
 exclude:
   - x-ignore
+pagination_priority:
+  - checkpoint
+  - offset
+  - page
+  - cursor
+  - none
 ```
 
 ### Example: With Backup
@@ -111,6 +158,88 @@ openmorph --input ./openapi --mapping x-foo=x-bar --backup
 
 ```sh
 openmorph --input ./openapi --mapping x-foo=x-bar --validate
+```
+
+### Example: Pagination Priority
+
+Transform APIs to use only checkpoint pagination (highest priority):
+
+```sh
+openmorph --input ./openapi --pagination-priority checkpoint,offset,none
+```
+
+Remove lower-priority pagination strategies:
+
+```sh
+openmorph --input ./openapi --pagination-priority cursor,page,offset,none --dry-run
+```
+
+## Pagination Priority
+
+The pagination priority feature allows you to enforce a single pagination strategy across your OpenAPI specifications by removing lower-priority pagination parameters and responses.
+
+### How It Works
+
+When pagination priority is configured, OpenMorph:
+
+1. **Detects** all pagination strategies in each endpoint (parameters and responses)
+2. **Selects** the highest priority strategy from those available
+3. **Removes** parameters and response schemas belonging to lower-priority strategies
+4. **Preserves** OpenAPI structure integrity (handles `oneOf`, `anyOf`, `allOf`)
+5. **Cleans up** unused component schemas
+
+### Supported Pagination Strategies
+
+| Strategy   | Parameters                           | Response Fields                          |
+| ---------- | ------------------------------------ | ---------------------------------------- |
+| checkpoint | `from`, `take`, `after`              | `next`, `next_checkpoint`                |
+| offset     | `offset`, `limit`, `include_totals`  | `total`, `offset`, `limit`, `count`      |
+| page       | `page`, `per_page`, `include_totals` | `start`, `limit`, `total`, `total_count` |
+| cursor     | `cursor`, `size`                     | `next_cursor`, `has_more`                |
+| none       | (no parameters)                      | (no fields)                              |
+
+### Example Transformations
+
+**Before** (multiple pagination strategies):
+
+```yaml
+"/users":
+  get:
+    parameters:
+      - name: offset
+        in: query
+      - name: from
+        in: query
+    responses:
+      "200":
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - properties:
+                    total: { type: integer } # offset
+                    users: { type: array }
+                - properties:
+                    next: { type: string } # checkpoint
+                    users: { type: array }
+```
+
+**After** (with priority `checkpoint,offset`):
+
+```yaml
+"/users":
+  get:
+    parameters:
+      - name: from
+        in: query
+    responses:
+      "200":
+        content:
+          application/json:
+            schema:
+              properties:
+                next: { type: string }
+                users: { type: array }
 ```
 
 ## Interactive TUI Controls
@@ -140,6 +269,24 @@ openmorph --input ./openapi --mapping x-foo=x-bar --validate
 
 - No secrets, credentials, or sensitive info are stored or required.
 - Please report any security issues via GitHub issues.
+
+## Development
+
+### Release Management
+
+This project uses automated release management with package managers support. See the [Auto-Release Guide](AUTO_RELEASE_GUIDE.md) for complete setup instructions.
+
+Quick commands:
+```bash
+# Validate setup
+make validate
+
+# Create release
+make version-release
+
+# Setup package managers
+make setup-packages
+```
 
 ## License
 

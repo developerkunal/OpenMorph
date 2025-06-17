@@ -17,26 +17,47 @@ import (
 // version is set by GoReleaser at build time. Do not update manually.
 var version = "dev"
 
+// getVersion returns the current version, preferring build-time version,
+// then falling back to .version file, then "dev"
+func getVersion() string {
+	// If version was set at build time (not "dev"), use it
+	if version != "dev" {
+		return version
+	}
+	
+	// Try to read from .version file
+	if content, err := os.ReadFile(".version"); err == nil {
+		if v := strings.TrimSpace(string(content)); v != "" {
+			return "v" + v
+		}
+	}
+	
+	// Fallback to "dev"
+	return "dev"
+}
+
 var (
 	inputDir   string
 	configFile string
 	inlineMaps []string
 
-	dryRun   bool
-	backup   bool
-	exclude  []string
-	validate bool
-	noConfig bool
+	dryRun                bool
+	backup                bool
+	exclude               []string
+	validate              bool
+	noConfig              bool
+	interactive           bool
+	paginationPriorityStr string
 )
 
 var rootCmd = &cobra.Command{
 	Use:     "openmorph",
 	Short:   "Transform OpenAPI vendor extension keys via mapping",
 	Long:    `OpenMorph: Transform OpenAPI vendor extension keys in YAML/JSON files via mapping config or inline args.`,
-	Version: version,
+	Version: getVersion(),
 	Run: func(cmd *cobra.Command, _ []string) {
 		if cmd.Flag("version") != nil && cmd.Flag("version").Changed {
-			fmt.Println("OpenMorph version:", version)
+			fmt.Println("OpenMorph version:", getVersion())
 			return
 		}
 		fmt.Printf("[DEBUG] backup flag value at start of Run: %v\n", backup)
@@ -45,12 +66,23 @@ var rootCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "Config error:", err)
 			os.Exit(1)
 		}
-		// Merge CLI --exclude and --validate with config
+		// Merge CLI --exclude, --validate, and --backup with config
 		if len(exclude) > 0 {
 			cfg.Exclude = append(cfg.Exclude, exclude...)
 		}
 		if validate {
 			cfg.Validate = true
+		}
+		if cmd.Flag("backup") != nil && cmd.Flag("backup").Changed {
+			cfg.Backup = backup
+		}
+		if paginationPriorityStr != "" {
+			// Parse comma-separated pagination priority
+			priorities := strings.Split(paginationPriorityStr, ",")
+			for i, p := range priorities {
+				priorities[i] = strings.TrimSpace(p)
+			}
+			cfg.PaginationPriority = priorities
 		}
 
 		// Pretty-print config summary
@@ -59,6 +91,9 @@ var rootCmd = &cobra.Command{
 		fmt.Printf("  \033[1;34mBackup:  \033[0m%v\n", cfg.Backup)
 		fmt.Printf("  \033[1;34mValidate:\033[0m %v\n", cfg.Validate)
 		fmt.Printf("  \033[1;34mExclude: \033[0m%v\n", cfg.Exclude)
+		if len(cfg.PaginationPriority) > 0 {
+			fmt.Printf("  \033[1;34mPagination Priority:\033[0m %v\n", cfg.PaginationPriority)
+		}
 		fmt.Printf("  \033[1;34mMappings:\033[0m\n")
 		for k, v := range cfg.Mappings {
 			fmt.Printf("    %s \033[1;32m→\033[0m %s\n", k, v)
@@ -67,7 +102,7 @@ var rootCmd = &cobra.Command{
 		fmt.Printf("Input dir: %s\n", cfg.Input)
 
 		// If interactive flag is set, launch TUI for preview/approval BEFORE any transformation
-		if cmd.Flag("interactive") != nil && cmd.Flag("interactive").Changed {
+		if interactive {
 			// Collect key changes for each file (but do not transform yet)
 			inputFiles := []string{}
 			_ = filepath.Walk(cfg.Input, func(path string, info os.FileInfo, err error) error {
@@ -136,14 +171,14 @@ var rootCmd = &cobra.Command{
 						Mappings: cfg.Mappings,
 						Exclude:  cfg.Exclude,
 						DryRun:   false,
-						Backup:   backup,
+						Backup:   cfg.Backup,
 					})
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "Transform error for %s: %v\n", f, err)
 					} else if ok {
 						actuallyChanged = append(actuallyChanged, f)
 						// If backup is requested, ensure backup file is created
-						if backup {
+						if cfg.Backup {
 							if _, err := os.Stat(f + ".bak"); err != nil {
 								fmt.Fprintf(os.Stderr, "[WARNING] Backup file not found for %s after transform.\n", f)
 							}
@@ -185,6 +220,56 @@ var rootCmd = &cobra.Command{
 			} else {
 				fmt.Printf("\033[1;32mTransformed files:\033[0m %v\n", actuallyChanged)
 			}
+
+			// Process pagination if priority is configured (for interactive mode)
+			if len(cfg.PaginationPriority) > 0 && len(actuallyChanged) > 0 {
+				fmt.Printf("\033[1;36mProcessing pagination with priority: %v\033[0m\n", cfg.PaginationPriority)
+				paginationOpts := transform.PaginationOptions{
+					Options: transform.Options{
+						Mappings: cfg.Mappings,
+						Exclude:  cfg.Exclude,
+						DryRun:   false,
+						Backup:   cfg.Backup,
+					},
+					PaginationPriority: cfg.PaginationPriority,
+				}
+				paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, paginationOpts)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Pagination processing error:", err)
+					os.Exit(2)
+				}
+
+				if paginationResult.Changed {
+					fmt.Printf("Pagination processing completed:\n")
+					fmt.Printf("  \033[1;32mProcessed files:\033[0m %d\n", len(paginationResult.ProcessedFiles))
+					if len(paginationResult.RemovedParams) > 0 {
+						fmt.Printf("  \033[1;33mRemoved parameters:\033[0m\n")
+						for endpoint, params := range paginationResult.RemovedParams {
+							fmt.Printf("    %s: %v\n", endpoint, params)
+						}
+					}
+					if len(paginationResult.RemovedResponses) > 0 {
+						fmt.Printf("  \033[1;33mRemoved responses:\033[0m\n")
+						for endpoint, responses := range paginationResult.RemovedResponses {
+							fmt.Printf("    %s: %v\n", endpoint, responses)
+						}
+					}
+					if len(paginationResult.UnusedComponents) > 0 {
+						fmt.Printf("  \033[1;31mRemoved unused components:\033[0m %v\n", paginationResult.UnusedComponents)
+					}
+				} else {
+					fmt.Println("  \033[1;33mNo pagination changes needed\033[0m")
+				}
+			}
+
+			// Run validation if requested (for interactive mode)
+			if cfg.Validate {
+				if err := runSwaggerValidate(cfg.Input); err != nil {
+					fmt.Fprintln(os.Stderr, "Validation error:", err)
+					os.Exit(3)
+				}
+				fmt.Println("Validation passed.")
+			}
 			return
 		}
 
@@ -193,7 +278,7 @@ var rootCmd = &cobra.Command{
 			Mappings: cfg.Mappings,
 			Exclude:  cfg.Exclude,
 			DryRun:   dryRun,
-			Backup:   backup, // always use CLI flag value
+			Backup:   cfg.Backup, // use config value (merged with CLI)
 		}
 		changed, err := transform.Dir(cfg.Input, opts)
 		fmt.Printf("Files detected for transform: %v\n", changed)
@@ -202,6 +287,42 @@ var rootCmd = &cobra.Command{
 			os.Exit(2)
 		}
 		fmt.Printf("Transformed files: %v\n", changed)
+
+		// Process pagination if priority is configured
+		if len(cfg.PaginationPriority) > 0 {
+			fmt.Printf("\033[1;36mProcessing pagination with priority: %v\033[0m\n", cfg.PaginationPriority)
+			paginationOpts := transform.PaginationOptions{
+				Options:            opts,
+				PaginationPriority: cfg.PaginationPriority,
+			}
+			paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, paginationOpts)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Pagination processing error:", err)
+				os.Exit(2)
+			}
+
+			if paginationResult.Changed {
+				fmt.Printf("Pagination processing completed:\n")
+				fmt.Printf("  \033[1;32mProcessed files:\033[0m %d\n", len(paginationResult.ProcessedFiles))
+				if len(paginationResult.RemovedParams) > 0 {
+					fmt.Printf("  \033[1;33mRemoved parameters:\033[0m\n")
+					for endpoint, params := range paginationResult.RemovedParams {
+						fmt.Printf("    %s: %v\n", endpoint, params)
+					}
+				}
+				if len(paginationResult.RemovedResponses) > 0 {
+					fmt.Printf("  \033[1;33mRemoved responses:\033[0m\n")
+					for endpoint, responses := range paginationResult.RemovedResponses {
+						fmt.Printf("    %s: %v\n", endpoint, responses)
+					}
+				}
+				if len(paginationResult.UnusedComponents) > 0 {
+					fmt.Printf("  \033[1;31mRemoved unused components:\033[0m %v\n", paginationResult.UnusedComponents)
+				}
+			} else {
+				fmt.Println("  \033[1;33mNo pagination changes needed\033[0m")
+			}
+		}
 
 		// Run validation if requested
 		if cfg.Validate && !dryRun {
@@ -222,8 +343,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&backup, "backup", false, "Save a .bak copy before overwriting")
 	rootCmd.PersistentFlags().StringArrayVar(&exclude, "exclude", nil, "Keys to exclude from transformation (repeatable)")
 	rootCmd.PersistentFlags().BoolVar(&validate, "validate", false, "Run swagger-cli validate after transforming")
-	rootCmd.PersistentFlags().Bool("interactive", false, "Launch a TUI for interactive preview and approval")
+	rootCmd.PersistentFlags().BoolVar(&interactive, "interactive", false, "Launch a TUI for interactive preview and approval")
 	rootCmd.PersistentFlags().BoolVar(&noConfig, "no-config", false, "Ignore all config files and use only CLI flags")
+	rootCmd.PersistentFlags().StringVar(&paginationPriorityStr, "pagination-priority", "", "Pagination strategy priority order (e.g., checkpoint,offset,page,cursor,none)")
 }
 
 // Execute runs the root command.

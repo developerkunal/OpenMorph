@@ -1,0 +1,2 @@
+# This file ensures the bucket directory exists
+# GoReleaser will create the actual manifest files here automatically

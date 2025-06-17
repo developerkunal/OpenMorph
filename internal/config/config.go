@@ -8,11 +8,12 @@ import (
 )
 
 type Config struct {
-	Input    string            `yaml:"input" json:"input"`
-	Backup   bool              `yaml:"backup" json:"backup"`
-	Validate bool              `yaml:"validate" json:"validate"`
-	Exclude  []string          `yaml:"exclude" json:"exclude"`
-	Mappings map[string]string `yaml:"mappings" json:"mappings"`
+	Input              string            `yaml:"input" json:"input"`
+	Backup             bool              `yaml:"backup" json:"backup"`
+	Validate           bool              `yaml:"validate" json:"validate"`
+	Exclude            []string          `yaml:"exclude" json:"exclude"`
+	Mappings           map[string]string `yaml:"mappings" json:"mappings"`
+	PaginationPriority []string          `yaml:"pagination_priority" json:"pagination_priority"`
 }
 
 // LoadConfig loads config from file (YAML/JSON) and merges with inline flags. If noConfig is true, ignores all config files and uses only CLI flags.
@@ -64,6 +65,7 @@ func LoadConfig(configPath string, inlineMaps []string, inputDir string, noConfi
 	if cfg.Input == "" {
 		return nil, errors.New("input directory is required")
 	}
+
 	return cfg, nil
 }
 

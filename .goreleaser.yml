@@ -1,3 +1,4 @@
+version: 2
 project_name: openmorph
 builds:
   - main: ./main.go
@@ -10,14 +11,12 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X 'main.version={{.Tag}}'
+      - -s -w -X 'github.com/developerkunal/OpenMorph/cmd.version={{.Tag}}'
 archives:
-  - format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - README.md
-      - "{{ .Binary }}*"
 changelog:
   sort: desc
   filters:
@@ -28,3 +27,37 @@ release:
   github:
     owner: developerkunal
     name: OpenMorph
+
+# Homebrew tap
+brews:
+  - name: openmorph
+    homepage: "https://github.com/developerkunal/OpenMorph"
+    description: "A tool for transforming and optimizing OpenAPI specifications"
+    license: "MIT"
+    repository:
+      owner: developerkunal
+      name: homebrew-openmorph
+      branch: main
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    directory: Formula
+    test: |
+      system "#{bin}/openmorph --version"
+    install: |
+      bin.install "openmorph"
+
+# Scoop bucket
+scoops:
+  - name: openmorph
+    homepage: "https://github.com/developerkunal/OpenMorph"
+    description: "A tool for transforming and optimizing OpenAPI specifications"
+    license: "MIT"
+    repository:
+      owner: developerkunal
+      name: scoop-openmorph
+      branch: main
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    directory: bucket

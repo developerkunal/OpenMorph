@@ -1,32 +1,94 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
+# Go Build Artifacts
 # Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+openmorph
+openmorph.exe
 
 # Test binary, built with `go test -c`
 *.test
 
 # Code coverage profiles and other test artifacts
 *.out
+*.html
 coverage.*
 *.coverprofile
 profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
+*.prof
 
 # Go workspace file
 go.work
 go.work.sum
 
-# env file
+# Environment and config files
 .env
+.env.local
+.env.production
+.env.staging
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Build and Release Artifacts
+dist/
+build/
+target/
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+*.dmg
+*.pkg
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Editor/IDE files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.vim/
+.emacs.d/
+*~
+.#*
+\#*#
+
+# Dependency directories
+vendor/
+node_modules/
+
+# Test artifacts and cache
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+log/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+.temp/
+
+# GoReleaser artifacts
+goreleaser.yaml.backup

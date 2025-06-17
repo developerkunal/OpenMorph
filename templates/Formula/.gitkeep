@@ -1,0 +1,2 @@
+# This file ensures the Formula directory exists
+# GoReleaser will create the actual formula files here automatically
