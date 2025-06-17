@@ -37,6 +37,7 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 ### Package Managers (Recommended)
 
 #### Homebrew (macOS/Linux)
+
 ```bash
 # Add the tap
 brew tap developerkunal/openmorph
@@ -46,6 +47,7 @@ brew install openmorph
 ```
 
 #### Scoop (Windows)
+
 ```powershell
 # Add the bucket
 scoop bucket add openmorph https://github.com/developerkunal/scoop-openmorph
@@ -57,9 +59,11 @@ scoop install openmorph
 ### From Source
 
 #### Prerequisites
+
 - Go 1.24 or later
 
 #### Build from source
+
 ```bash
 # Clone the repository
 git clone https://github.com/developerkunal/OpenMorph.git
@@ -72,6 +76,7 @@ go build -o openmorph main.go
 ```
 
 #### Install from source
+
 ```bash
 # Build and install to GOPATH/bin
 make install
@@ -119,6 +124,8 @@ openmorph --input ./openapi --mapping x-foo=x-bar --exclude x-ignore
 ```sh
 openmorph --input ./openapi --mapping x-foo=x-bar --dry-run
 ```
+
+**Note:** In dry-run mode, transformations (pagination and response flattening) are previewed independently based on the original file. In actual execution, they are applied sequentially, so later steps may show different results. Use `--interactive` mode to see the exact cumulative effects of all transformations.
 
 ### Example: Interactive Review (TUI)
 
@@ -277,6 +284,7 @@ When pagination priority is configured, OpenMorph:
 This project uses automated release management with package managers support. See the [Auto-Release Guide](AUTO_RELEASE_GUIDE.md) for complete setup instructions.
 
 Quick commands:
+
 ```bash
 # Validate setup
 make validate

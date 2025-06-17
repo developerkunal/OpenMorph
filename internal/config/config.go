@@ -14,6 +14,7 @@ type Config struct {
 	Exclude            []string          `yaml:"exclude" json:"exclude"`
 	Mappings           map[string]string `yaml:"mappings" json:"mappings"`
 	PaginationPriority []string          `yaml:"pagination_priority" json:"pagination_priority"`
+	FlattenResponses   bool              `yaml:"flatten_responses" json:"flatten_responses"`
 }
 
 // LoadConfig loads config from file (YAML/JSON) and merges with inline flags. If noConfig is true, ignores all config files and uses only CLI flags.

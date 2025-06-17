@@ -14,6 +14,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	colorReset  = "\033[0m"
+	colorBold   = "\033[1m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorCyan   = "\033[36m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorRed    = "\033[31m"
+)
+
 // version is set by GoReleaser at build time. Do not update manually.
 var version = "dev"
 
@@ -48,6 +59,7 @@ var (
 	noConfig              bool
 	interactive           bool
 	paginationPriorityStr string
+	flattenResponses      bool
 )
 
 var rootCmd = &cobra.Command{
@@ -66,7 +78,7 @@ var rootCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "Config error:", err)
 			os.Exit(1)
 		}
-		// Merge CLI --exclude, --validate, and --backup with config
+		// Merge CLI --exclude, --validate, --backup, and --flatten-responses with config
 		if len(exclude) > 0 {
 			cfg.Exclude = append(cfg.Exclude, exclude...)
 		}
@@ -75,6 +87,9 @@ var rootCmd = &cobra.Command{
 		}
 		if cmd.Flag("backup") != nil && cmd.Flag("backup").Changed {
 			cfg.Backup = backup
+		}
+		if cmd.Flag("flatten-responses") != nil && cmd.Flag("flatten-responses").Changed {
+			cfg.FlattenResponses = flattenResponses
 		}
 		if paginationPriorityStr != "" {
 			// Parse comma-separated pagination priority
@@ -90,6 +105,7 @@ var rootCmd = &cobra.Command{
 		fmt.Printf("  \033[1;34mInput:   \033[0m%s\n", cfg.Input)
 		fmt.Printf("  \033[1;34mBackup:  \033[0m%v\n", cfg.Backup)
 		fmt.Printf("  \033[1;34mValidate:\033[0m %v\n", cfg.Validate)
+		fmt.Printf("  \033[1;34mFlatten Responses:\033[0m %v\n", cfg.FlattenResponses)
 		fmt.Printf("  \033[1;34mExclude: \033[0m%v\n", cfg.Exclude)
 		if len(cfg.PaginationPriority) > 0 {
 			fmt.Printf("  \033[1;34mPagination Priority:\033[0m %v\n", cfg.PaginationPriority)
@@ -242,6 +258,27 @@ var rootCmd = &cobra.Command{
 				printPaginationResults(paginationResult)
 			}
 
+			// Process response flattening if configured (for interactive mode)
+			if cfg.FlattenResponses && len(actuallyChanged) > 0 {
+				fmt.Printf("\033[1;36mProcessing response flattening...\033[0m\n")
+				flattenOpts := transform.FlattenOptions{
+					Options: transform.Options{
+						Mappings: cfg.Mappings,
+						Exclude:  cfg.Exclude,
+						DryRun:   false,
+						Backup:   cfg.Backup,
+					},
+					FlattenResponses: cfg.FlattenResponses,
+				}
+				flattenResult, err := transform.ProcessFlatteningInDir(cfg.Input, flattenOpts)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Response flattening error:", err)
+					os.Exit(2)
+				}
+
+				printFlattenResults(flattenResult)
+			}
+
 			// Run validation if requested (for interactive mode)
 			if cfg.Validate {
 				if err := runSwaggerValidate(cfg.Input); err != nil {
@@ -268,8 +305,81 @@ var rootCmd = &cobra.Command{
 		}
 		fmt.Printf("Transformed files: %v\n", changed)
 
-		// Process pagination if priority is configured
-		if len(cfg.PaginationPriority) > 0 {
+		// In dry-run mode, show what would be changed for pagination and flattening
+		if dryRun {
+			fmt.Printf("\033[1;33m╭─────────────────────────────────────────────────────────────╮\033[0m\n")
+			fmt.Printf("\033[1;33m│                    DRY-RUN PREVIEW MODE                     │\033[0m\n")
+			fmt.Printf("\033[1;33m╰─────────────────────────────────────────────────────────────╯\033[0m\n")
+			fmt.Printf("\033[1;31m⚠️  IMPORTANT: Dry-run shows INDEPENDENT previews of each step.\033[0m\n")
+			fmt.Printf("\033[1;31m   In actual execution, steps are CUMULATIVE (each builds on the previous).\033[0m\n")
+			fmt.Printf("\033[1;31m   Flattening results will differ significantly in real execution!\033[0m\n\n")
+
+			if len(cfg.PaginationPriority) > 0 {
+				fmt.Printf("\033[1;36m[STEP 1] Pagination changes with priority: %v\033[0m\n", cfg.PaginationPriority)
+				dryRunPaginationOpts := transform.PaginationOptions{
+					Options: transform.Options{
+						Mappings: cfg.Mappings,
+						Exclude:  cfg.Exclude,
+						DryRun:   true, // Force dry-run for preview
+						Backup:   cfg.Backup,
+					},
+					PaginationPriority: cfg.PaginationPriority,
+				}
+				paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, dryRunPaginationOpts)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Pagination dry-run error:", err)
+				} else {
+					printPaginationResults(paginationResult)
+				}
+				fmt.Println()
+			}
+			if cfg.FlattenResponses {
+				fmt.Printf("\033[1;36m[STEP 2] Response flattening changes\033[0m\n")
+				fmt.Printf("\033[1;31m⚠️  CRITICAL: This preview operates on the ORIGINAL file.\033[0m\n")
+				fmt.Printf("\033[1;31m   Real execution will show SIGNIFICANTLY MORE changes\033[0m\n")
+				fmt.Printf("\033[1;31m   because pagination creates new schemas to flatten!\033[0m\n")
+				dryRunFlattenOpts := transform.FlattenOptions{
+					Options: transform.Options{
+						Mappings: cfg.Mappings,
+						Exclude:  cfg.Exclude,
+						DryRun:   true, // Force dry-run for preview
+						Backup:   cfg.Backup,
+					},
+					FlattenResponses: cfg.FlattenResponses,
+				}
+				flattenResult, err := transform.ProcessFlatteningInDir(cfg.Input, dryRunFlattenOpts)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Response flattening dry-run error:", err)
+				} else {
+					printFlattenResults(flattenResult)
+				}
+				fmt.Println()
+			}
+			if cfg.Validate {
+				fmt.Printf("\033[1;36m[STEP 3] Validation\033[0m\n")
+				fmt.Printf("\033[1;33m⏭️  Skipping validation in dry-run mode\033[0m\n\n")
+			}
+
+			fmt.Printf("\033[1;36m╭─────────────────────────────────────────────────────────────╮\033[0m\n")
+			fmt.Printf("\033[1;36m│ 💡 TIP: Use --interactive mode to see exact cumulative     │\033[0m\n")
+			fmt.Printf("\033[1;36m│    effects of all transformations applied sequentially.    │\033[0m\n")
+			fmt.Printf("\033[1;36m╰─────────────────────────────────────────────────────────────╯\033[0m\n")
+
+			fmt.Printf("\n\033[1;33m📊 DRY-RUN SUMMARY:\033[0m\n")
+			fmt.Printf("   • Mapping changes: Applied to original file\n")
+			if len(cfg.PaginationPriority) > 0 {
+				fmt.Printf("   • Pagination changes: Based on original file state\n")
+			}
+			if cfg.FlattenResponses {
+				fmt.Printf("   • Flattening changes: Based on original file (will be much more extensive in real execution)\n")
+			}
+			fmt.Printf("\n\033[1;32m✅ For accurate cumulative results, use:\033[0m\n")
+			fmt.Printf("   • \033[1;36m--interactive\033[0m mode for step-by-step review\n")
+			fmt.Printf("   • Run without \033[1;36m--dry-run\033[0m on a backup/test file\n")
+		}
+
+		// Process pagination if priority is configured (skip in dry-run mode)
+		if len(cfg.PaginationPriority) > 0 && !dryRun {
 			fmt.Printf("\033[1;36mProcessing pagination with priority: %v\033[0m\n", cfg.PaginationPriority)
 			paginationOpts := transform.PaginationOptions{
 				Options:            opts,
@@ -282,6 +392,22 @@ var rootCmd = &cobra.Command{
 			}
 
 			printPaginationResults(paginationResult)
+		}
+
+		// Process response flattening if configured (skip in dry-run mode)
+		if cfg.FlattenResponses && !dryRun {
+			fmt.Printf("\033[1;36mProcessing response flattening...\033[0m\n")
+			flattenOpts := transform.FlattenOptions{
+				Options:          opts,
+				FlattenResponses: cfg.FlattenResponses,
+			}
+			flattenResult, err := transform.ProcessFlatteningInDir(cfg.Input, flattenOpts)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Response flattening error:", err)
+				os.Exit(2)
+			}
+
+			printFlattenResults(flattenResult)
 		}
 
 		// Run validation if requested
@@ -299,13 +425,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&inputDir, "input", "i", "", "Directory containing OpenAPI specs (YAML/JSON)")
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "Mapping config file (.yaml or .json)")
 	rootCmd.PersistentFlags().StringArrayVar(&inlineMaps, "map", nil, "Inline key mappings (from=to), repeatable")
-	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would change without writing files")
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would change without writing files (Note: multi-step transformations shown independently, use --interactive for cumulative preview)")
 	rootCmd.PersistentFlags().BoolVar(&backup, "backup", false, "Save a .bak copy before overwriting")
 	rootCmd.PersistentFlags().StringArrayVar(&exclude, "exclude", nil, "Keys to exclude from transformation (repeatable)")
 	rootCmd.PersistentFlags().BoolVar(&validate, "validate", false, "Run swagger-cli validate after transforming")
 	rootCmd.PersistentFlags().BoolVar(&interactive, "interactive", false, "Launch a TUI for interactive preview and approval")
 	rootCmd.PersistentFlags().BoolVar(&noConfig, "no-config", false, "Ignore all config files and use only CLI flags")
 	rootCmd.PersistentFlags().StringVar(&paginationPriorityStr, "pagination-priority", "", "Pagination strategy priority order (e.g., checkpoint,offset,page,cursor,none)")
+	rootCmd.PersistentFlags().BoolVar(&flattenResponses, "flatten-responses", false, "Flatten oneOf/anyOf/allOf with single $ref after pagination processing")
 }
 
 // Execute runs the root command.
@@ -384,6 +511,64 @@ func printPaginationResults(paginationResult *transform.PaginationResult) {
 		}
 	} else {
 		fmt.Println("  \033[1;33mNo pagination changes needed\033[0m")
+	}
+}
+
+func printFlattenResults(flattenResult *transform.FlattenResult) {
+	if flattenResult == nil {
+		fmt.Printf("  %sNo flattening result to display%s\n", colorRed, colorReset)
+		return
+	}
+
+	fmt.Println("🛠️  Processing response flattening...")
+
+	if !flattenResult.Changed {
+		fmt.Printf("  %sNo response flattening changes needed.%s\n", colorYellow, colorReset)
+		return
+	}
+
+	fmt.Printf("%s✅ Response flattening completed%s\n", colorGreen, colorReset)
+	fmt.Printf("  📄 Processed files: %s%d%s\n", colorGreen, len(flattenResult.ProcessedFiles), colorReset)
+
+	for file, refs := range flattenResult.FlattenedRefs {
+		fmt.Printf("\n🔍 Flattened references in: %s%s%s\n", colorBold, file, colorReset)
+
+		var oneOfs, anyOfs, allOfs, remaps []string
+		for _, ref := range refs {
+			switch {
+			case strings.Contains(ref, "oneOf"):
+				oneOfs = append(oneOfs, ref)
+			case strings.Contains(ref, "anyOf"):
+				anyOfs = append(anyOfs, ref)
+			case strings.Contains(ref, "allOf"):
+				allOfs = append(allOfs, ref)
+			default:
+				remaps = append(remaps, ref)
+			}
+		}
+
+		printCategory := func(label string, color string, items []string) {
+			if len(items) == 0 {
+				return
+			}
+			fmt.Printf("  ── %s%s%s:\n", color, label, colorReset)
+			for _, item := range items {
+				parts := strings.SplitN(item, "->", 2)
+				if len(parts) == 2 {
+					fmt.Printf("      - %s%s%s\n        %s→%s %s\n",
+						colorBold, strings.TrimSpace(parts[0]), colorReset,
+						colorGreen, colorReset, strings.TrimSpace(parts[1]),
+					)
+				} else {
+					fmt.Printf("      - %s\n", item)
+				}
+			}
+		}
+
+		printCategory("oneOf replacements", colorYellow, oneOfs)
+		printCategory("anyOf replacements", colorCyan, anyOfs)
+		printCategory("allOf replacements", colorPurple, allOfs)
+		printCategory("$ref remappings", colorBlue, remaps)
 	}
 }
 

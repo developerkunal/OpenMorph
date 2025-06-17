@@ -112,19 +112,24 @@ func processDocumentPagination(doc, root *yaml.Node, path string, opts Paginatio
 	changed := processPaginationInPaths(root, opts, path, result)
 
 	if changed {
-		return handleDocumentChanges(doc, root, path, componentsBefore, result)
+		return handleDocumentChanges(doc, root, path, componentsBefore, result, opts)
 	}
 
 	return false, nil
 }
 
 // handleDocumentChanges handles post-processing and file writing after pagination changes
-func handleDocumentChanges(doc, root *yaml.Node, path string, componentsBefore map[string]bool, result *PaginationResult) (bool, error) {
+func handleDocumentChanges(doc, root *yaml.Node, path string, componentsBefore map[string]bool, result *PaginationResult, opts PaginationOptions) (bool, error) {
 	componentsAfter := extractComponentRefs(root)
 	unused := findUnusedComponents(root, componentsBefore, componentsAfter)
 	if len(unused) > 0 {
 		removeUnusedComponents(root, unused)
 		result.UnusedComponents = append(result.UnusedComponents, unused...)
+	}
+
+	// Only write to file if not in dry-run mode
+	if opts.DryRun {
+		return true, nil // Return true to indicate changes were detected, but don't write
 	}
 
 	return writeModifiedDocument(doc, path)
