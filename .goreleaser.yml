@@ -38,6 +38,7 @@ brews:
       owner: developerkunal
       name: homebrew-openmorph
       branch: main
+      token: "{{ .Env.PACKAGE_MANAGER_GITHUB_TOKEN }}"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
@@ -57,6 +58,7 @@ scoops:
       owner: developerkunal
       name: scoop-openmorph
       branch: main
+      token: "{{ .Env.PACKAGE_MANAGER_GITHUB_TOKEN }}"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
