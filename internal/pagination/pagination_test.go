@@ -671,12 +671,12 @@ responses:
               type: array
               items:
                 type: string
-            total:
+            offset:
               type: integer
-              description: offset pagination field
+              description: offset pagination field - should be removed
             start:
               type: integer
-              description: page pagination field
+              description: page pagination field - should be kept
   '400':
     description: Error
     content:
@@ -686,9 +686,9 @@ responses:
           properties:
             error:
               type: string
-            total:
-              type: integer
-              description: only offset field, should be cleaned
+            message:
+              type: string
+              description: error message, no pagination fields
 `
 
 	var opNode yaml.Node
@@ -702,7 +702,7 @@ responses:
 		opContentNode = opNode.Content[0]
 	}
 
-	// Test with page priority (should keep start, remove total from 400 response)
+	// Test with page priority (should keep start, remove offset from 200 response)
 	opts := Options{Priority: []string{"page", "offset", "cursor", "checkpoint", "none"}}
 
 	result, err := ProcessEndpoint(opContentNode, opts)
@@ -714,8 +714,8 @@ responses:
 	t.Logf("Removed responses: %v", result.RemovedResponses)
 	t.Logf("Modified schemas: %v", result.ModifiedSchemas)
 
-	// 400 response should have been modified to remove the "total" field
-	// but shouldn't be entirely removed since it has non-pagination content
+	// The 200 response should have been modified to remove the "offset" field
+	// since it belongs only to the non-selected "offset" strategy
 	if len(result.ModifiedSchemas) == 0 {
 		t.Errorf("Expected some schemas to be modified to remove unwanted pagination fields")
 	}

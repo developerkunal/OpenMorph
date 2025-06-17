@@ -24,14 +24,14 @@ func getVersion() string {
 	if version != "dev" {
 		return version
 	}
-	
+
 	// Try to read from .version file
 	if content, err := os.ReadFile(".version"); err == nil {
 		if v := strings.TrimSpace(string(content)); v != "" {
 			return "v" + v
 		}
 	}
-	
+
 	// Fallback to "dev"
 	return "dev"
 }
@@ -239,27 +239,7 @@ var rootCmd = &cobra.Command{
 					os.Exit(2)
 				}
 
-				if paginationResult.Changed {
-					fmt.Printf("Pagination processing completed:\n")
-					fmt.Printf("  \033[1;32mProcessed files:\033[0m %d\n", len(paginationResult.ProcessedFiles))
-					if len(paginationResult.RemovedParams) > 0 {
-						fmt.Printf("  \033[1;33mRemoved parameters:\033[0m\n")
-						for endpoint, params := range paginationResult.RemovedParams {
-							fmt.Printf("    %s: %v\n", endpoint, params)
-						}
-					}
-					if len(paginationResult.RemovedResponses) > 0 {
-						fmt.Printf("  \033[1;33mRemoved responses:\033[0m\n")
-						for endpoint, responses := range paginationResult.RemovedResponses {
-							fmt.Printf("    %s: %v\n", endpoint, responses)
-						}
-					}
-					if len(paginationResult.UnusedComponents) > 0 {
-						fmt.Printf("  \033[1;31mRemoved unused components:\033[0m %v\n", paginationResult.UnusedComponents)
-					}
-				} else {
-					fmt.Println("  \033[1;33mNo pagination changes needed\033[0m")
-				}
+				printPaginationResults(paginationResult)
 			}
 
 			// Run validation if requested (for interactive mode)
@@ -301,27 +281,7 @@ var rootCmd = &cobra.Command{
 				os.Exit(2)
 			}
 
-			if paginationResult.Changed {
-				fmt.Printf("Pagination processing completed:\n")
-				fmt.Printf("  \033[1;32mProcessed files:\033[0m %d\n", len(paginationResult.ProcessedFiles))
-				if len(paginationResult.RemovedParams) > 0 {
-					fmt.Printf("  \033[1;33mRemoved parameters:\033[0m\n")
-					for endpoint, params := range paginationResult.RemovedParams {
-						fmt.Printf("    %s: %v\n", endpoint, params)
-					}
-				}
-				if len(paginationResult.RemovedResponses) > 0 {
-					fmt.Printf("  \033[1;33mRemoved responses:\033[0m\n")
-					for endpoint, responses := range paginationResult.RemovedResponses {
-						fmt.Printf("    %s: %v\n", endpoint, responses)
-					}
-				}
-				if len(paginationResult.UnusedComponents) > 0 {
-					fmt.Printf("  \033[1;31mRemoved unused components:\033[0m %v\n", paginationResult.UnusedComponents)
-				}
-			} else {
-				fmt.Println("  \033[1;33mNo pagination changes needed\033[0m")
-			}
+			printPaginationResults(paginationResult)
 		}
 
 		// Run validation if requested
@@ -400,6 +360,31 @@ func runShell(cmd string) int {
 		return 1
 	}
 	return 0
+}
+
+// printPaginationResults prints the pagination processing results
+func printPaginationResults(paginationResult *transform.PaginationResult) {
+	if paginationResult.Changed {
+		fmt.Printf("Pagination processing completed:\n")
+		fmt.Printf("  \033[1;32mProcessed files:\033[0m %d\n", len(paginationResult.ProcessedFiles))
+		if len(paginationResult.RemovedParams) > 0 {
+			fmt.Printf("  \033[1;33mRemoved parameters:\033[0m\n")
+			for endpoint, params := range paginationResult.RemovedParams {
+				fmt.Printf("    %s: %v\n", endpoint, params)
+			}
+		}
+		if len(paginationResult.RemovedResponses) > 0 {
+			fmt.Printf("  \033[1;33mRemoved responses:\033[0m\n")
+			for endpoint, responses := range paginationResult.RemovedResponses {
+				fmt.Printf("    %s: %v\n", endpoint, responses)
+			}
+		}
+		if len(paginationResult.UnusedComponents) > 0 {
+			fmt.Printf("  \033[1;31mRemoved unused components:\033[0m %v\n", paginationResult.UnusedComponents)
+		}
+	} else {
+		fmt.Println("  \033[1;33mNo pagination changes needed\033[0m")
+	}
 }
 
 // execCommand is a wrapper for exec.Command (for testability)

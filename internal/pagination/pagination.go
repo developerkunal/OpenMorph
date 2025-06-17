@@ -233,140 +233,158 @@ func ProcessEndpointWithDoc(operation *yaml.Node, doc *yaml.Node, opts Options) 
 		return result, nil
 	}
 
-	// Get parameters and responses
 	params := getNodeValue(operation, "parameters")
 	responses := getNodeValue(operation, "responses")
 
-	// Detect pagination in both params and responses
+	strategies := detectPaginationStrategies(params, responses, doc)
+	if len(strategies.paramStrategies) == 0 {
+		return result, nil
+	}
+
+	if !needsProcessingCheck(strategies, params, responses, doc) {
+		return result, nil
+	}
+
+	selectedStrategy := selectBestStrategy(strategies, opts)
+	if selectedStrategy == "" {
+		return result, nil
+	}
+
+	return processEndpointCleanup(params, responses, selectedStrategy, strategies.allPagination, doc, result)
+}
+
+// detectPaginationStrategies extracts pagination strategies from params and responses
+func detectPaginationStrategies(params, responses *yaml.Node, doc *yaml.Node) *paginationStrategies {
 	paramPagination := DetectPaginationInParams(params)
 	responsePagination := DetectPaginationInResponsesWithDoc(responses, doc)
 
-	// Determine which strategies are present in PARAMETERS (primary for selection)
 	paramStrategies := make(map[string]bool)
 	for _, p := range paramPagination {
 		paramStrategies[p.Strategy] = true
 	}
 
-	// Determine which strategies are present in RESPONSES (for cleanup only)
 	responseStrategies := make(map[string]bool)
 	for _, r := range responsePagination {
 		responseStrategies[r.Strategy] = true
 	}
 
-	// If no pagination strategies detected in parameters, don't modify the endpoint
-	// (we only process endpoints that have pagination parameters)
-	if len(paramStrategies) == 0 {
-		return result, nil
+	allPagination := append(paramPagination, responsePagination...)
+
+	return &paginationStrategies{
+		paramStrategies:    paramStrategies,
+		responseStrategies: responseStrategies,
+		allPagination:      allPagination,
+	}
+}
+
+// paginationStrategies holds detected pagination strategy information
+type paginationStrategies struct {
+	paramStrategies    map[string]bool
+	responseStrategies map[string]bool
+	allPagination      []DetectedPagination
+}
+
+// needsProcessingCheck determines if endpoint processing is needed
+func needsProcessingCheck(strategies *paginationStrategies, params, responses *yaml.Node, doc *yaml.Node) bool {
+	if len(strategies.paramStrategies) > 1 {
+		return true
 	}
 
-	// Check if processing is needed:
-	// 1. Multiple parameter strategies detected, OR
-	// 2. Response strategies differ from parameter strategies (cleanup needed), OR
-	// 3. There are orphaned shared parameters that don't belong to detected strategies, OR
-	// 4. Response schemas contain mixed pagination types (plain array + paginated responses)
-	needsProcessing := len(paramStrategies) > 1
+	if hasResponseCleanupNeeded(strategies) {
+		return true
+	}
 
-	if !needsProcessing {
-		// Single parameter strategy - check if response cleanup is needed
-		for responseStrategy := range responseStrategies {
-			if !paramStrategies[responseStrategy] {
-				// Response has a strategy not in parameters - cleanup needed
-				needsProcessing = true
-				break
-			}
+	if hasOrphanedSharedParams(params, strategies.paramStrategies) {
+		return true
+	}
+
+	if responses != nil && hasMixedResponseCompositions(responses, doc) {
+		return true
+	}
+
+	return false
+}
+
+// hasResponseCleanupNeeded checks if response cleanup is needed
+func hasResponseCleanupNeeded(strategies *paginationStrategies) bool {
+	for responseStrategy := range strategies.responseStrategies {
+		if !strategies.paramStrategies[responseStrategy] {
+			return true
 		}
 	}
+	return false
+}
 
-	if !needsProcessing {
-		// Single parameter strategy - check for orphaned shared parameters
-		if params != nil {
-			sharedParams := findSharedParams()
-			for _, param := range params.Content {
-				if param.Kind != yaml.MappingNode {
-					continue
-				}
-				paramName := getStringValue(param, "name")
-				if paramName != "" && sharedParams[paramName] {
-					// This is a shared parameter - check if it belongs to any detected strategy
-					belongsToDetected := false
-					for strategy := range paramStrategies {
-						for _, strategyParam := range PaginationStrategies[strategy].Params {
-							if matchesParam(paramName, strategyParam) {
-								belongsToDetected = true
-								break
-							}
-						}
-						if belongsToDetected {
-							break
-						}
-					}
-					if !belongsToDetected {
-						// Orphaned shared parameter - needs to be removed
-						needsProcessing = true
-						break
-					}
-				}
-			}
+// hasOrphanedSharedParams checks for orphaned shared parameters
+func hasOrphanedSharedParams(params *yaml.Node, paramStrategies map[string]bool) bool {
+	if params == nil {
+		return false
+	}
+
+	sharedParams := findSharedParams()
+	for _, param := range params.Content {
+		if param.Kind != yaml.MappingNode {
+			continue
+		}
+
+		paramName := getStringValue(param, "name")
+		if paramName == "" || !sharedParams[paramName] {
+			continue
+		}
+
+		if !belongsToAnyDetectedStrategy(paramName, paramStrategies) {
+			return true
 		}
 	}
+	return false
+}
 
-	if !needsProcessing {
-		// Single parameter strategy - check for mixed response compositions
-		// (plain array + paginated responses in oneOf/anyOf/allOf)
-		if responses != nil && hasMixedResponseCompositions(responses, doc) {
-			needsProcessing = true
-		}
-	}
-
-	if !needsProcessing {
-		// Single strategy, no cleanup needed
-		return result, nil
-	}
-
-	// Select strategy based on strict priority order
-	// Prefer strategies with parameters, but allow response-only strategies if no param strategies match
-	var selectedStrategy string
-	allStrategies := make(map[string]bool)
+// belongsToAnyDetectedStrategy checks if parameter belongs to any detected strategy
+func belongsToAnyDetectedStrategy(paramName string, paramStrategies map[string]bool) bool {
 	for strategy := range paramStrategies {
+		for _, strategyParam := range PaginationStrategies[strategy].Params {
+			if matchesParam(paramName, strategyParam) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// selectBestStrategy selects the best strategy based on priority
+func selectBestStrategy(strategies *paginationStrategies, opts Options) string {
+	allStrategies := make(map[string]bool)
+	for strategy := range strategies.paramStrategies {
 		allStrategies[strategy] = true
 	}
-	for strategy := range responseStrategies {
+	for strategy := range strategies.responseStrategies {
 		allStrategies[strategy] = true
 	}
 
 	// First pass: look for strategies that have parameters
 	for _, priority := range opts.Priority {
 		if priority == "none" && len(allStrategies) > 0 {
-			// Special case: "none" means remove all pagination if it's highest priority
-			selectedStrategy = "none"
-			break
+			return "none"
 		}
-		if paramStrategies[priority] {
-			// Found a strategy that has parameters - prefer this
-			selectedStrategy = priority
-			break
+		if strategies.paramStrategies[priority] {
+			return priority
 		}
 	}
 
-	// Second pass: if no parameter strategy found, look for response-only strategies
-	if selectedStrategy == "" {
-		for _, priority := range opts.Priority {
-			if responseStrategies[priority] && !paramStrategies[priority] {
-				// Found a response-only strategy
-				selectedStrategy = priority
-				break
-			}
+	// Second pass: look for response-only strategies
+	for _, priority := range opts.Priority {
+		if strategies.responseStrategies[priority] && !strategies.paramStrategies[priority] {
+			return priority
 		}
 	}
 
-	if selectedStrategy == "" {
-		// No strategy in priority list found
-		return result, nil
-	}
+	return ""
+}
 
-	// Remove lower priority strategies
+// processEndpointCleanup performs the actual cleanup of params and responses
+func processEndpointCleanup(params, responses *yaml.Node, selectedStrategy string, allPagination []DetectedPagination, doc *yaml.Node, result *ProcessResult) (*ProcessResult, error) {
 	if params != nil {
-		removed := removeUnwantedParams(params, selectedStrategy, paramPagination)
+		removed := removeUnwantedParams(params, selectedStrategy, allPagination)
 		result.RemovedParams = removed
 		if len(removed) > 0 {
 			result.Changed = true
@@ -374,7 +392,7 @@ func ProcessEndpointWithDoc(operation *yaml.Node, doc *yaml.Node, opts Options) 
 	}
 
 	if responses != nil {
-		removed, modified := removeUnwantedResponsesWithDoc(responses, selectedStrategy, responsePagination, doc)
+		removed, modified := removeUnwantedResponsesWithDoc(responses, selectedStrategy, allPagination, doc)
 		result.RemovedResponses = removed
 		result.ModifiedSchemas = modified
 		if len(removed) > 0 || len(modified) > 0 {
@@ -408,89 +426,82 @@ func removeUnwantedParams(params *yaml.Node, selectedStrategy string, detected [
 			continue
 		}
 
-		// Special handling for "none" strategy - remove all pagination parameters
-		if selectedStrategy == "none" {
-			isPaginationParam := false
-			for _, d := range detected {
-				for _, p := range d.Parameters {
-					if p == paramName {
-						isPaginationParam = true
-						break
-					}
-				}
-				if isPaginationParam {
-					break
-				}
-			}
-
-			if isPaginationParam {
-				removed = append(removed, paramName)
-			} else {
-				newContent = append(newContent, param)
-			}
-			continue
-		}
-
-		// Check if this param belongs to the selected strategy
-		belongsToSelected := false
-		selectedParams := PaginationStrategies[selectedStrategy].Params
-		for _, selectedParam := range selectedParams {
-			if matchesParam(paramName, selectedParam) {
-				belongsToSelected = true
-				break
-			}
-		}
-
-		// If the parameter belongs to the selected strategy, keep it
-		if belongsToSelected {
+		shouldKeep := shouldKeepParameter(paramName, selectedStrategy, detected)
+		if shouldKeep {
 			newContent = append(newContent, param)
 		} else {
-			// Check if this param belongs to any unwanted strategy (detected or not)
-			belongsToUnwanted := false
-
-			// First check detected strategies
-			for _, d := range detected {
-				if d.Strategy != selectedStrategy {
-					for _, p := range d.Parameters {
-						if p == paramName {
-							belongsToUnwanted = true
-							break
-						}
-					}
-					if belongsToUnwanted {
-						break
-					}
-				}
-			}
-
-			// Also check if this param belongs to any pagination strategy that wasn't detected
-			// This handles shared parameters like include_totals
-			if !belongsToUnwanted {
-				for strategyName, strategy := range PaginationStrategies {
-					if strategyName != selectedStrategy {
-						for _, strategyParam := range strategy.Params {
-							if matchesParam(paramName, strategyParam) {
-								belongsToUnwanted = true
-								break
-							}
-						}
-						if belongsToUnwanted {
-							break
-						}
-					}
-				}
-			}
-
-			if belongsToUnwanted {
-				removed = append(removed, paramName)
-			} else {
-				newContent = append(newContent, param)
-			}
+			removed = append(removed, paramName)
 		}
 	}
 
 	params.Content = newContent
 	return removed
+}
+
+// shouldKeepParameter determines if a parameter should be kept based on the selected strategy
+func shouldKeepParameter(paramName, selectedStrategy string, detected []DetectedPagination) bool {
+	// Special handling for "none" strategy - remove all pagination parameters
+	if selectedStrategy == "none" {
+		return !isPaginationParameter(paramName, detected)
+	}
+
+	// Check if this param belongs to the selected strategy
+	if belongsToStrategy(paramName, selectedStrategy) {
+		return true
+	}
+
+	// If it doesn't belong to selected strategy, check if it belongs to any pagination strategy
+	return !belongsToAnyPaginationStrategy(paramName, selectedStrategy, detected)
+}
+
+// isPaginationParameter checks if a parameter is a pagination parameter
+func isPaginationParameter(paramName string, detected []DetectedPagination) bool {
+	for _, d := range detected {
+		for _, p := range d.Parameters {
+			if p == paramName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// belongsToStrategy checks if a parameter belongs to a specific strategy
+func belongsToStrategy(paramName, strategy string) bool {
+	selectedParams := PaginationStrategies[strategy].Params
+	for _, selectedParam := range selectedParams {
+		if matchesParam(paramName, selectedParam) {
+			return true
+		}
+	}
+	return false
+}
+
+// belongsToAnyPaginationStrategy checks if a parameter belongs to any pagination strategy (detected or not)
+func belongsToAnyPaginationStrategy(paramName, selectedStrategy string, detected []DetectedPagination) bool {
+	// First check detected strategies
+	for _, d := range detected {
+		if d.Strategy != selectedStrategy {
+			for _, p := range d.Parameters {
+				if p == paramName {
+					return true
+				}
+			}
+		}
+	}
+
+	// Also check if this param belongs to any pagination strategy that wasn't detected
+	for strategyName, strategy := range PaginationStrategies {
+		if strategyName != selectedStrategy {
+			for _, strategyParam := range strategy.Params {
+				if matchesParam(paramName, strategyParam) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // removeUnwantedResponses removes or modifies responses that contain unwanted pagination
@@ -507,122 +518,132 @@ func removeUnwantedResponsesWithDoc(responses *yaml.Node, selectedStrategy strin
 		return removedResponses, modifiedSchemas
 	}
 
-	// Create a new content slice
 	var newContent []*yaml.Node
 
 	for i := 0; i < len(responses.Content); i += 2 {
 		responseCode := responses.Content[i]
 		responseNode := responses.Content[i+1]
 
-		// Check if this response contains unwanted pagination
-		var fields []string
-		if doc != nil {
-			fields = extractFieldsFromResponseWithDoc(responseNode, doc)
-		} else {
-			fields = extractFieldsFromResponse(responseNode)
-		}
+		processResult := processResponseForCleanup(responseNode, selectedStrategy, detected, doc)
 
-		// Special handling for "none" strategy - remove all pagination fields
-		if selectedStrategy == "none" {
-			containsPaginationFields := false
-			for _, field := range fields {
-				// Check if field belongs to any detected strategy
-				for _, d := range detected {
-					for _, strategyField := range d.Fields {
-						if matchesField(field, strategyField) {
-							containsPaginationFields = true
-							break
-						}
-					}
-					if containsPaginationFields {
-						break
-					}
-				}
-				if containsPaginationFields {
-					break
-				}
-			}
-
-			if containsPaginationFields {
-				// Clean all pagination fields from the schema
-				modified := cleanResponseSchemaWithDoc(responseNode, selectedStrategy, detected, doc)
-				if len(modified) > 0 {
-					modifiedSchemas = append(modifiedSchemas, modified...)
-				}
-			}
-
-			// Always keep the response for "none" strategy (just clean it)
-			newContent = append(newContent, responseCode, responseNode)
-			continue
-		}
-
-		containsUnwanted := false
-
-		for _, field := range fields {
-			// Check if field belongs to unwanted strategies (detected or not)
-			// First check detected strategies
-			for _, d := range detected {
-				if d.Strategy != selectedStrategy {
-					for _, unwantedField := range d.Fields {
-						if matchesField(field, unwantedField) {
-							containsUnwanted = true
-							break
-						}
-					}
-					if containsUnwanted {
-						break
-					}
-				}
-			}
-
-			// Also check if this field belongs to any pagination strategy that wasn't detected
-			// This handles shared fields like "total" that belong to multiple strategies
-			if !containsUnwanted {
-				for strategyName, strategy := range PaginationStrategies {
-					if strategyName != selectedStrategy {
-						for _, strategyField := range strategy.Fields {
-							if matchesField(field, strategyField) {
-								containsUnwanted = true
-								break
-							}
-						}
-						if containsUnwanted {
-							break
-						}
-					}
-				}
-			}
-
-			if containsUnwanted {
-				break
-			}
-		}
-
-		// Decision logic:
-		// - If response contains unwanted pagination fields, clean the schema
-		// - Never remove entire responses, always try to clean them first
-		if containsUnwanted {
-			// Clean the schema to remove unwanted pagination fields
-			modified := cleanResponseSchemaWithDoc(responseNode, selectedStrategy, detected, doc)
-			if len(modified) > 0 {
-				modifiedSchemas = append(modifiedSchemas, modified...)
-			}
-		} else {
-			// Even if no unwanted fields detected at response level, check for mixed compositions
-			if hasMixedCompositionInResponse(responseNode, doc) {
-				modified := cleanResponseSchemaWithDoc(responseNode, selectedStrategy, detected, doc)
-				if len(modified) > 0 {
-					modifiedSchemas = append(modifiedSchemas, modified...)
-				}
-			}
-		}
-
-		// Keep the response
 		newContent = append(newContent, responseCode, responseNode)
+		if len(processResult.modifications) > 0 {
+			modifiedSchemas = append(modifiedSchemas, processResult.modifications...)
+		}
 	}
 
 	responses.Content = newContent
 	return removedResponses, modifiedSchemas
+}
+
+// responseCleanupResult holds the result of processing a response for cleanup
+type responseCleanupResult struct {
+	modifications []string
+}
+
+// processResponseForCleanup processes a single response for pagination cleanup
+func processResponseForCleanup(responseNode *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) responseCleanupResult {
+	var fields []string
+	if doc != nil {
+		fields = extractFieldsFromResponseWithDoc(responseNode, doc)
+	} else {
+		fields = extractFieldsFromResponse(responseNode)
+	}
+
+	if selectedStrategy == "none" {
+		return processResponseForNoneCleanup(responseNode, fields, detected, doc)
+	}
+
+	return processResponseForStrategyCleanup(responseNode, fields, selectedStrategy, detected, doc)
+}
+
+// processResponseForNoneCleanup handles cleanup for "none" strategy
+func processResponseForNoneCleanup(responseNode *yaml.Node, fields []string, detected []DetectedPagination, doc *yaml.Node) responseCleanupResult {
+	containsPaginationFields := checkForPaginationFields(fields, detected)
+
+	var modifications []string
+	if containsPaginationFields {
+		modifications = cleanResponseSchemaWithDoc(responseNode, "none", detected, doc)
+	}
+
+	return responseCleanupResult{modifications: modifications}
+}
+
+// processResponseForStrategyCleanup handles cleanup for specific strategies
+func processResponseForStrategyCleanup(responseNode *yaml.Node, fields []string, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) responseCleanupResult {
+	containsUnwanted := checkForUnwantedFields(fields, selectedStrategy, detected)
+
+	var modifications []string
+	if containsUnwanted {
+		modifications = cleanResponseSchemaWithDoc(responseNode, selectedStrategy, detected, doc)
+	} else if hasMixedCompositionInResponse(responseNode, doc) {
+		modifications = cleanResponseSchemaWithDoc(responseNode, selectedStrategy, detected, doc)
+	}
+
+	return responseCleanupResult{modifications: modifications}
+}
+
+// checkForPaginationFields checks if fields contain any pagination fields from detected strategies
+func checkForPaginationFields(fields []string, detected []DetectedPagination) bool {
+	for _, field := range fields {
+		for _, d := range detected {
+			for _, strategyField := range d.Fields {
+				if matchesField(field, strategyField) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// checkForUnwantedFields checks if fields contain unwanted pagination fields
+func checkForUnwantedFields(fields []string, selectedStrategy string, detected []DetectedPagination) bool {
+	for _, field := range fields {
+		if fieldBelongsToUnwantedStrategy(field, selectedStrategy, detected) {
+			return true
+		}
+	}
+	return false
+}
+
+// fieldBelongsToUnwantedStrategy checks if a field belongs to an unwanted strategy
+func fieldBelongsToUnwantedStrategy(field, selectedStrategy string, detected []DetectedPagination) bool {
+	// Check detected strategies
+	if fieldBelongsToNonSelectedDetectedStrategy(field, selectedStrategy, detected) {
+		return true
+	}
+
+	// Check all pagination strategies that weren't detected
+	return fieldBelongsToNonSelectedPaginationStrategy(field, selectedStrategy)
+}
+
+// fieldBelongsToNonSelectedDetectedStrategy checks if field belongs to non-selected detected strategies
+func fieldBelongsToNonSelectedDetectedStrategy(field, selectedStrategy string, detected []DetectedPagination) bool {
+	for _, d := range detected {
+		if d.Strategy != selectedStrategy {
+			for _, unwantedField := range d.Fields {
+				if matchesField(field, unwantedField) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// fieldBelongsToNonSelectedPaginationStrategy checks if field belongs to non-selected pagination strategies
+func fieldBelongsToNonSelectedPaginationStrategy(field, selectedStrategy string) bool {
+	for strategyName, strategy := range PaginationStrategies {
+		if strategyName != selectedStrategy {
+			for _, strategyField := range strategy.Fields {
+				if matchesField(field, strategyField) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // cleanResponseSchema removes unwanted pagination fields from response schemas
@@ -755,39 +776,7 @@ func cleanPropertiesNode(properties *yaml.Node, selectedStrategy string, detecte
 		propName := properties.Content[i].Value
 		propNode := properties.Content[i+1]
 
-		shouldRemove := false
-
-		// Special handling for "none" strategy - remove all pagination fields
-		if selectedStrategy == "none" {
-			// Check if this property is any pagination field (from detected or all strategies)
-			for _, d := range detected {
-				for _, field := range d.Fields {
-					if matchesField(propName, field) {
-						shouldRemove = true
-						break
-					}
-				}
-				if shouldRemove {
-					break
-				}
-			}
-
-			// Also check against all strategy definitions for "none" strategy
-			if !shouldRemove {
-				for _, strategy := range PaginationStrategies {
-					for _, strategyField := range strategy.Fields {
-						if matchesField(propName, strategyField) {
-							shouldRemove = true
-							break
-						}
-					}
-					if shouldRemove {
-						break
-					}
-				}
-			}
-		}
-		// For other strategies, don't remove individual fields - let shouldKeepSchemaItem handle whole objects
+		shouldRemove := shouldRemoveProperty(propName, selectedStrategy, detected, properties)
 
 		if !shouldRemove {
 			newContent = append(newContent, properties.Content[i], propNode)
@@ -796,8 +785,166 @@ func cleanPropertiesNode(properties *yaml.Node, selectedStrategy string, detecte
 		}
 	}
 
-	properties.Content = newContent
+	if modified {
+		properties.Content = newContent
+	}
+
 	return modified
+}
+
+// shouldRemoveProperty determines if a property should be removed
+func shouldRemoveProperty(propName, selectedStrategy string, detected []DetectedPagination, properties *yaml.Node) bool {
+	if selectedStrategy == "none" {
+		return shouldRemoveForNoneStrategy(propName, detected)
+	}
+
+	return shouldRemoveForOtherStrategy(propName, selectedStrategy, detected, properties)
+}
+
+// shouldRemoveForNoneStrategy handles removal logic for "none" strategy
+func shouldRemoveForNoneStrategy(propName string, detected []DetectedPagination) bool {
+	// Check if this property is any pagination field (from detected or all strategies)
+	for _, d := range detected {
+		for _, field := range d.Fields {
+			if matchesField(propName, field) {
+				return true
+			}
+		}
+	}
+
+	// Also check against all strategy definitions for "none" strategy
+	for _, strategy := range PaginationStrategies {
+		for _, strategyField := range strategy.Fields {
+			if matchesField(propName, strategyField) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// shouldRemoveForOtherStrategy handles removal logic for non-"none" strategies
+func shouldRemoveForOtherStrategy(propName, selectedStrategy string, detected []DetectedPagination, properties *yaml.Node) bool {
+	belongsToSelected := belongsToSelectedStrategy(propName, selectedStrategy)
+	belongsToNonSelected := belongsToNonSelectedStrategy(propName, selectedStrategy, detected)
+
+	if belongsToSelected && belongsToNonSelected {
+		return handleSharedFieldDecision(propName, selectedStrategy, detected, properties)
+	}
+
+	if belongsToSelected && !belongsToNonSelected {
+		return false // Keep fields that only belong to selected strategy
+	}
+
+	if !belongsToSelected && belongsToNonSelected {
+		return true // Remove fields that only belong to non-selected strategy
+	}
+
+	// Field doesn't belong to any detected strategy, check all strategies
+	return belongsToAnyNonSelectedStrategy(propName, selectedStrategy)
+}
+
+// belongsToSelectedStrategy checks if property belongs to the selected strategy
+func belongsToSelectedStrategy(propName, selectedStrategy string) bool {
+	selectedStrategyDef := PaginationStrategies[selectedStrategy]
+	for _, selectedField := range selectedStrategyDef.Fields {
+		if matchesField(propName, selectedField) {
+			return true
+		}
+	}
+	return false
+}
+
+// belongsToNonSelectedStrategy checks if property belongs to any non-selected detected strategy
+func belongsToNonSelectedStrategy(propName, selectedStrategy string, detected []DetectedPagination) bool {
+	for _, d := range detected {
+		if d.Strategy != selectedStrategy {
+			for _, field := range d.Fields {
+				if matchesField(propName, field) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// handleSharedFieldDecision decides whether to keep or remove shared fields
+func handleSharedFieldDecision(propName, selectedStrategy string, detected []DetectedPagination, properties *yaml.Node) bool {
+	selectedStrategyDef := PaginationStrategies[selectedStrategy]
+
+	hasSelectedStrategyFields, hasNonSelectedStrategyFields := analyzeSchemaContext(
+		propName, selectedStrategy, selectedStrategyDef, detected, properties)
+
+	// If this schema has fields from selected strategy, keep shared fields
+	// If this schema only has fields from non-selected strategies, remove shared fields
+	if hasSelectedStrategyFields {
+		return false
+	} else if hasNonSelectedStrategyFields {
+		return true
+	}
+
+	// No clear indicators, default to keeping shared fields
+	return false
+}
+
+// analyzeSchemaContext analyzes the schema context to determine strategy indicators
+func analyzeSchemaContext(propName, selectedStrategy string, selectedStrategyDef Strategy, detected []DetectedPagination, properties *yaml.Node) (bool, bool) {
+	hasSelectedStrategyFields := false
+	hasNonSelectedStrategyFields := false
+
+	if properties.Kind != yaml.MappingNode {
+		return hasSelectedStrategyFields, hasNonSelectedStrategyFields
+	}
+
+	for j := 0; j < len(properties.Content); j += 2 {
+		siblingName := properties.Content[j].Value
+		if siblingName == propName {
+			continue // skip self
+		}
+
+		// Check if sibling belongs to selected strategy
+		for _, selectedField := range selectedStrategyDef.Fields {
+			if matchesField(siblingName, selectedField) {
+				hasSelectedStrategyFields = true
+				break
+			}
+		}
+
+		// Check if sibling belongs to non-selected strategies
+		for _, d := range detected {
+			if d.Strategy != selectedStrategy {
+				for _, field := range d.Fields {
+					if matchesField(siblingName, field) {
+						hasNonSelectedStrategyFields = true
+						break
+					}
+				}
+				if hasNonSelectedStrategyFields {
+					break
+				}
+			}
+		}
+	}
+
+	return hasSelectedStrategyFields, hasNonSelectedStrategyFields
+}
+
+// belongsToAnyNonSelectedStrategy checks if property belongs to any non-selected strategy
+func belongsToAnyNonSelectedStrategy(propName, selectedStrategy string) bool {
+	for strategyName, strategy := range PaginationStrategies {
+		if strategyName == selectedStrategy {
+			continue
+		}
+
+		for _, strategyField := range strategy.Fields {
+			if matchesField(propName, strategyField) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // shouldKeepSchemaItem determines if a schema item should be kept
@@ -806,12 +953,11 @@ func shouldKeepSchemaItem(item *yaml.Node, selectedStrategy string, detected []D
 }
 
 // shouldKeepSchemaItemWithDoc determines if a schema item should be kept with document context
-func shouldKeepSchemaItemWithDoc(item *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) bool {
+func shouldKeepSchemaItemWithDoc(item *yaml.Node, selectedStrategy string, _ []DetectedPagination, doc *yaml.Node) bool {
 	if item.Kind != yaml.MappingNode {
 		return true // Keep non-object items
 	}
 
-	// Extract fields from this schema item
 	var fields []string
 	if doc != nil {
 		fields = extractFieldsFromSchemaWithDoc(item, doc)
@@ -819,113 +965,40 @@ func shouldKeepSchemaItemWithDoc(item *yaml.Node, selectedStrategy string, detec
 		fields = extractFieldsFromSchema(item)
 	}
 
-	// Special handling for "none" strategy
 	if selectedStrategy == "none" {
-		// For "none" strategy, only keep items that have NO pagination fields
-		containsAnyPagination := false
-		for _, field := range fields {
-			// Check if this field belongs to ANY pagination strategy
-			for _, strategy := range PaginationStrategies {
-				for _, strategyField := range strategy.Fields {
-					if matchesField(field, strategyField) {
-						containsAnyPagination = true
-						break
-					}
-				}
-				if containsAnyPagination {
-					break
-				}
-			}
-			if containsAnyPagination {
-				break
-			}
-		}
-		// For "none" strategy, keep only schemas that have NO pagination fields
-		return !containsAnyPagination
+		return shouldKeepForNoneStrategy(fields)
 	}
 
-	// For other strategies, use strict strategy-specific logic
-	// Rule: Keep schemas that contain the selected strategy's unique fields
+	return shouldKeepForOtherStrategy(fields, selectedStrategy)
+}
 
-	containsSelectedUniqueFields := false
-	containsOtherStrategyUniqueFields := false
-
-	selectedFields := PaginationStrategies[selectedStrategy].Fields
-
-	// Check if this schema contains unique fields from the selected strategy
+// shouldKeepForNoneStrategy determines if schema should be kept for "none" strategy
+func shouldKeepForNoneStrategy(fields []string) bool {
+	// For "none" strategy, only keep items that have NO pagination fields
 	for _, field := range fields {
-		for _, selectedField := range selectedFields {
-			if matchesField(field, selectedField) {
-				// Check if this field is unique to the selected strategy or shared
-				isShared := false
-				for strategyName, strategy := range PaginationStrategies {
-					if strategyName != selectedStrategy {
-						for _, otherField := range strategy.Fields {
-							if matchesField(selectedField, otherField) {
-								isShared = true
-								break
-							}
-						}
-						if isShared {
-							break
-						}
-					}
-				}
-				if !isShared {
-					containsSelectedUniqueFields = true
-					break
-				}
-			}
-		}
-		if containsSelectedUniqueFields {
-			break
+		if fieldBelongsToAnyPaginationStrategy(field) {
+			return false
 		}
 	}
+	return true
+}
 
-	// Check if this schema contains unique fields from other strategies
-	for _, field := range fields {
-		for strategyName, strategy := range PaginationStrategies {
-			if strategyName != selectedStrategy {
-				for _, strategyField := range strategy.Fields {
-					if matchesField(field, strategyField) {
-						// Check if this field is unique to this other strategy
-						isShared := false
-						for otherStrategyName, otherStrategy := range PaginationStrategies {
-							if otherStrategyName != strategyName {
-								for _, otherField := range otherStrategy.Fields {
-									if matchesField(strategyField, otherField) {
-										isShared = true
-										break
-									}
-								}
-								if isShared {
-									break
-								}
-							}
-						}
-						if !isShared {
-							containsOtherStrategyUniqueFields = true
-							break
-						}
-					}
-				}
-				if containsOtherStrategyUniqueFields {
-					break
-				}
+// fieldBelongsToAnyPaginationStrategy checks if field belongs to any pagination strategy
+func fieldBelongsToAnyPaginationStrategy(field string) bool {
+	for _, strategy := range PaginationStrategies {
+		for _, strategyField := range strategy.Fields {
+			if matchesField(field, strategyField) {
+				return true
 			}
 		}
-		if containsOtherStrategyUniqueFields {
-			break
-		}
 	}
+	return false
+}
 
-	// Decision logic for paginated endpoints:
-	// 1. If schema contains unique fields from selected strategy -> KEEP
-	// 2. If schema contains unique fields from other strategies -> REMOVE
-	// 3. If schema contains no pagination fields:
-	//    - For checkpoint/cursor strategies -> KEEP (allows non-paginated responses)
-	//    - For offset/page strategies -> REMOVE (requires consistent pagination)
-	// 4. If schema contains only shared fields -> REMOVE (not strategy-specific enough)
+// shouldKeepForOtherStrategy determines if schema should be kept for non-"none" strategies
+func shouldKeepForOtherStrategy(fields []string, selectedStrategy string) bool {
+	containsSelectedUniqueFields := hasUniqueFieldsFromStrategy(fields, selectedStrategy)
+	containsOtherStrategyUniqueFields := hasUniqueFieldsFromOtherStrategies(fields, selectedStrategy)
 
 	if containsSelectedUniqueFields {
 		return true // Contains unique fields from selected strategy
@@ -935,14 +1008,52 @@ func shouldKeepSchemaItemWithDoc(item *yaml.Node, selectedStrategy string, detec
 		return false // Contains unique fields from other strategies
 	}
 
-	// Handle schemas with no pagination fields
-	// For paginated endpoints, we want only responses that match the selected strategy
-	// Plain arrays (non-paginated responses) should be removed when pagination parameters are present
-	// This ensures consistent pagination behavior across the API
-
-	// For other pagination strategies, remove schemas that don't have strategy-specific fields
-	// This ensures only one pagination response remains per endpoint
+	// Handle schemas with no pagination fields - remove for consistent pagination behavior
 	return false
+}
+
+// hasUniqueFieldsFromStrategy checks if fields contain unique fields from the selected strategy
+func hasUniqueFieldsFromStrategy(fields []string, selectedStrategy string) bool {
+	selectedFields := PaginationStrategies[selectedStrategy].Fields
+
+	for _, field := range fields {
+		for _, selectedField := range selectedFields {
+			if matchesField(field, selectedField) && isFieldUniqueToStrategy(selectedField, selectedStrategy) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasUniqueFieldsFromOtherStrategies checks if fields contain unique fields from other strategies
+func hasUniqueFieldsFromOtherStrategies(fields []string, selectedStrategy string) bool {
+	for _, field := range fields {
+		for strategyName, strategy := range PaginationStrategies {
+			if strategyName != selectedStrategy {
+				for _, strategyField := range strategy.Fields {
+					if matchesField(field, strategyField) && isFieldUniqueToStrategy(strategyField, strategyName) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// isFieldUniqueToStrategy checks if a field is unique to a specific strategy
+func isFieldUniqueToStrategy(field, strategy string) bool {
+	for strategyName, strategyDef := range PaginationStrategies {
+		if strategyName != strategy {
+			for _, otherField := range strategyDef.Fields {
+				if matchesField(field, otherField) {
+					return false // Field is shared with another strategy
+				}
+			}
+		}
+	}
+	return true // Field is unique to this strategy
 }
 
 // hasMixedResponseComposition checks if responses contain mixed pagination types in oneOf/anyOf/allOf
