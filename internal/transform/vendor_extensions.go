@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -348,11 +349,31 @@ func addExtensionToOperation(operationNode *yaml.Node, extensionName string, ext
 	return true
 }
 
-// createYAMLNodeFromMap creates a YAML node from a map
+// createYAMLNodeFromMap creates a YAML node from a map with consistent key ordering
 func createYAMLNodeFromMap(data map[string]interface{}) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
-	for key, value := range data {
+	// Sort keys with custom ordering for pagination fields
+	var keys []string
+	for key := range data {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		orderI := getPaginationFieldOrder(keys[i])
+		orderJ := getPaginationFieldOrder(keys[j])
+		
+		// If orders are the same, sort alphabetically
+		if orderI == orderJ {
+			return keys[i] < keys[j]
+		}
+		
+		return orderI < orderJ
+	})
+
+	// Add keys and values in sorted order
+	for _, key := range keys {
+		value := data[key]
+		
 		keyNode := &yaml.Node{
 			Kind:  yaml.ScalarNode,
 			Value: key,
@@ -374,6 +395,30 @@ func createYAMLNodeFromMap(data map[string]interface{}) *yaml.Node {
 	}
 
 	return node
+}
+
+// getPaginationFieldOrder returns the priority order for pagination fields
+// Lower numbers appear first in the output
+func getPaginationFieldOrder(key string) int {
+	switch key {
+	case "offset":
+		return 1
+	case "cursor": 
+		return 1 // Same priority as offset - they're mutually exclusive
+	case "page":
+		return 1 // Same priority as offset/cursor - they're mutually exclusive
+	case "results":
+		return 2
+	case "limit":
+		return 3
+	case "next":
+		return 4
+	case "previous":
+		return 5
+	default:
+		// Unknown fields come last, sorted alphabetically by adding 1000 + ASCII value
+		return 1000
+	}
 }
 
 // Helper functions

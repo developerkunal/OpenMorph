@@ -3,6 +3,7 @@ package transform
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -797,6 +798,67 @@ func TestCreateYAMLNodeFromMap(t *testing.T) {
 	}
 }
 
+func TestCreateYAMLNodeFromMapOrdering(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]interface{}
+		expected []string // expected order of keys
+	}{
+		{
+			name: "pagination fields in correct order",
+			input: map[string]interface{}{
+				"results": "$response.data",
+				"offset":  "$request.page",
+				"limit":   "$request.per_page",
+			},
+			expected: []string{"offset", "results", "limit"},
+		},
+		{
+			name: "pagination fields with cursor",
+			input: map[string]interface{}{
+				"cursor":  "$request.cursor",
+				"results": "$response.items",
+				"next":    "$response.next_cursor",
+			},
+			expected: []string{"cursor", "results", "next"},
+		},
+		{
+			name: "mixed known and unknown fields",
+			input: map[string]interface{}{
+				"unknown_field": "value",
+				"results":       "$response.data",
+				"offset":        "$request.page",
+				"custom":        "custom_value",
+			},
+			expected: []string{"offset", "results", "custom", "unknown_field"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := createYAMLNodeFromMap(tt.input)
+
+			// Extract the key order from the YAML node
+			var actualKeys []string
+			for i := 0; i < len(node.Content); i += 2 {
+				actualKeys = append(actualKeys, node.Content[i].Value)
+			}
+
+			// Verify the order matches expected
+			if len(actualKeys) != len(tt.expected) {
+				t.Errorf("Expected %d keys, got %d", len(tt.expected), len(actualKeys))
+				return
+			}
+
+			for i, expectedKey := range tt.expected {
+				if actualKeys[i] != expectedKey {
+					t.Errorf("At position %d: expected key %q, got %q", i, expectedKey, actualKeys[i])
+				}
+			}
+		})
+	}
+}
+
 func TestAddProcessedExtension(t *testing.T) {
 	result := &VendorExtensionResult{
 		AddedExtensions: make(map[string][]string),
@@ -1125,5 +1187,47 @@ info:
 				}
 			}
 		})
+	}
+}
+
+func TestConsistentPaginationOrdering(t *testing.T) {
+	// Test the exact case mentioned in the user request
+	paginationData := map[string]interface{}{
+		"results": "$response.network_acls",
+		"offset":  "$request.page",
+	}
+
+	// Generate the YAML node multiple times to ensure consistent ordering
+	for i := 0; i < 5; i++ {
+		node := createYAMLNodeFromMap(paginationData)
+
+		// Convert to YAML string to verify output
+		var buffer strings.Builder
+		encoder := yaml.NewEncoder(&buffer)
+		encoder.SetIndent(2)
+		err := encoder.Encode(node)
+		if err != nil {
+			t.Fatalf("Failed to encode YAML: %v", err)
+		}
+		encoder.Close()
+
+		yamlOutput := buffer.String()
+
+		// Verify that "offset" appears before "results" in the output
+		offsetPos := strings.Index(yamlOutput, "offset:")
+		resultsPos := strings.Index(yamlOutput, "results:")
+
+		if offsetPos == -1 || resultsPos == -1 {
+			t.Fatalf("Missing expected fields in YAML output: %s", yamlOutput)
+		}
+
+		if offsetPos >= resultsPos {
+			t.Errorf("Expected 'offset' to appear before 'results' in YAML output, but got:\n%s", yamlOutput)
+		}
+
+		// For the first iteration, log the output for visual verification
+		if i == 0 {
+			t.Logf("Generated YAML output:\n%s", yamlOutput)
+		}
 	}
 }
