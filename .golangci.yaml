@@ -8,10 +8,12 @@ linters:
   enable:
     - dupl
     - gocyclo
+    - gocritic # Code quality and formatting checks
     - misspell
     - revive
     - gosec # Security checks
     - unused # Unused code detection
+    - whitespace # Whitespace formatting checks
   disable:
     - asasalint
     - bodyclose
@@ -23,7 +25,6 @@ linters:
     - funlen
     - gocognit
     - goconst
-    - gocritic
     - godox
     - goheader
     - goprintffuncname
@@ -42,7 +43,6 @@ linters:
     - unconvert
     - unparam
     - wastedassign
-    - whitespace
     - wrapcheck
     - wsl
   settings:
@@ -54,8 +54,6 @@ linters:
       min-complexity: 15
     misspell:
       locale: US
-    gofmt:
-      simplify: true
     gosec:
       confidence: medium
       severity: medium

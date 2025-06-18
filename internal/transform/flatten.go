@@ -379,7 +379,8 @@ func flattenSchemaNode(node *yaml.Node, schemaName, path string, result *Flatten
 		key := node.Content[i].Value
 		value := node.Content[i+1]
 
-		if key == "oneOf" || key == "anyOf" || key == "allOf" {
+		switch key {
+		case "oneOf", "anyOf", "allOf":
 			if refValue := getSingleRefFromArray(value); refValue != "" {
 				// Replace the oneOf/anyOf/allOf with direct $ref
 				node.Content[i] = &yaml.Node{Kind: yaml.ScalarNode, Value: "$ref"}
@@ -393,16 +394,19 @@ func flattenSchemaNode(node *yaml.Node, schemaName, path string, result *Flatten
 				result.FlattenedRefs[path] = append(result.FlattenedRefs[path], flattenedPath)
 				changed = true
 			}
-		} else if value.Kind == yaml.MappingNode {
-			// Recursively process nested objects
-			if flattenSchemaNode(value, schemaName, path, result) {
-				changed = true
-			}
-		} else if value.Kind == yaml.SequenceNode {
-			// Process arrays
-			for _, item := range value.Content {
-				if flattenSchemaNode(item, schemaName, path, result) {
+		default:
+			switch value.Kind {
+			case yaml.MappingNode:
+				// Recursively process nested objects
+				if flattenSchemaNode(value, schemaName, path, result) {
 					changed = true
+				}
+			case yaml.SequenceNode:
+				// Process arrays
+				for _, item := range value.Content {
+					if flattenSchemaNode(item, schemaName, path, result) {
+						changed = true
+					}
 				}
 			}
 		}

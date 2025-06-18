@@ -286,7 +286,9 @@ func detectPaginationStrategies(params, responses *yaml.Node, doc *yaml.Node) *p
 		responseStrategies[r.Strategy] = true
 	}
 
-	allPagination := append(paramPagination, responsePagination...)
+	allPagination := make([]DetectedPagination, 0, len(paramPagination)+len(responsePagination))
+	allPagination = append(allPagination, paramPagination...)
+	allPagination = append(allPagination, responsePagination...)
 
 	return &paginationStrategies{
 		paramStrategies:    paramStrategies,

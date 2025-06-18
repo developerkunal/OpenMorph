@@ -105,9 +105,8 @@ func (Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
 		case "ctrl+c", "q":
 			return m.quit()
 		case "right", "l", "j":
@@ -307,11 +306,12 @@ func (m Model) View() string {
 	// Progress bar/summary with status icons
 	b.WriteString(progressBarStyle.Render("["))
 	for i, f := range m.Files {
-		if m.Accepted[f.Path] {
+		switch {
+		case m.Accepted[f.Path]:
 			b.WriteString(newKeyStyle.Render("✔"))
-		} else if m.Skipped[f.Path] {
+		case m.Skipped[f.Path]:
 			b.WriteString(oldKeyStyle.Render("✗"))
-		} else {
+		default:
 			b.WriteString("·")
 		}
 		if i < len(m.Files)-1 {
