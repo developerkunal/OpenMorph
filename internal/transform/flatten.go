@@ -80,16 +80,10 @@ func processDocumentFlattening(doc, root *yaml.Node, path string, opts FlattenOp
 	// Track component references before flattening to identify unused ones later
 	componentsBefore := extractComponentRefs(root)
 
-	changed := false
-
 	// First pass: flatten oneOf/anyOf/allOf with single refs
-	if processComponentsFlattening(root, path, result, &changed) {
-		changed = true
-	}
-
-	if processPathsFlattening(root, path, result, &changed) {
-		changed = true
-	}
+	changed := false
+	processComponentsFlattening(root, path, result, &changed)
+	processPathsFlattening(root, path, result, &changed)
 
 	// Second pass: flatten reference chains (optional, more aggressive)
 	if opts.FlattenResponses {
@@ -130,18 +124,16 @@ func flattenReferenceChains(root *yaml.Node, filePath string, result *FlattenRes
 	if len(refMap) == 0 {
 		return false
 	}
-
-	localChanged := false
-
 	// Flatten reference chains in components/schemas
-	if flattenSchemaReferences(root, refMap, filePath, result) {
-		localChanged = true
-	}
+	// Capture the result of the first flattening operation
+	schemaChanged := flattenSchemaReferences(root, refMap, filePath, result)
 
 	// Flatten reference chains in paths
-	if flattenPathReferences(root, refMap, filePath, result) {
-		localChanged = true
-	}
+	// Capture the result of the second flattening operation
+	pathChanged := flattenPathReferences(root, refMap, filePath, result)
+
+	// Combine the results: localChanged is true if either operation made a change
+	localChanged := schemaChanged || pathChanged
 
 	if localChanged {
 		*changed = true

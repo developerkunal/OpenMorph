@@ -159,12 +159,12 @@ paths:
 		t.Fatal("content is not a map[string]interface{}")
 	}
 
-	applicationJson, ok := content["application/json"].(map[string]interface{})
+	applicationJSON, ok := content["application/json"].(map[string]interface{})
 	if !ok {
 		t.Fatal("application/json is not a map[string]interface{}")
 	}
 
-	schema, ok := applicationJson["schema"].(map[string]interface{})
+	schema, ok := applicationJSON["schema"].(map[string]interface{})
 	if !ok {
 		t.Fatal("schema is not a map[string]interface{}")
 	}
@@ -441,12 +441,12 @@ paths:
 		t.Fatal("content is not a map[string]interface{}")
 	}
 
-	appJson, ok := content["application/json"].(map[string]interface{})
+	appJSON, ok := content["application/json"].(map[string]interface{})
 	if !ok {
 		t.Fatal("application/json is not a map[string]interface{}")
 	}
 
-	schema, ok := appJson["schema"].(map[string]interface{})
+	schema, ok := appJSON["schema"].(map[string]interface{})
 	if !ok {
 		t.Fatal("schema is not a map[string]interface{}")
 	}

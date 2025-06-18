@@ -1,122 +1,135 @@
-# GolangCI-Lint v2.x configuration (clean, no deprecated options)
-# See: https://golangci-lint.run/usage/configuration/
-
-linters-settings:
-  gocyclo:
-    min-complexity: 15
-  dupl:
-    threshold: 100
-  errcheck:
-    check-type-assertions: true
-  staticcheck:
-    checks: [all]
-  revive:
-    confidence: 0.8
-    severity: warning
-    rules:
-      - name: var-naming
-      - name: indent-error-flow
-      - name: error-naming
-      - name: if-return
-      - name: import-shadowing
-      - name: range-val-address
-      - name: time-naming
-      - name: unexported-return
-      - name: unused-parameter
-      - name: unused-receiver
-      - name: var-declaration
-      - name: exported
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: error-strings
-      - name: error-return
-      - name: errorf
-      - name: function-length
-  gofmt:
-    simplify: true
-  misspell:
-    locale: US
-
+version: "2"
 run:
-  timeout: 5m
-  tests: true
-  issues-exit-code: 1
   modules-download-mode: readonly
+  issues-exit-code: 1
+  tests: true
   allow-parallel-runners: true
-
-issues:
-  exclude-dirs:
-    - dist
-    - vendor
-    - .git
-    - .github
-    - .vscode
-    - .idea
-    - node_modules
-    - testdata
-  exclude-files:
-    - ".*_gen.go$"
-    - ".*_mock.go$"
-  exclude-rules:
-    # Exclude test files from certain linting rules
-    - path: ".*_test\\.go$"
-      linters:
-        - dupl
-        - gocyclo
-        - revive
-    # Allow longer functions in tests
-    - path: ".*_test\\.go$"
-      text: "function-length"
-    # Allow high cyclomatic complexity in tests
-    - path: ".*_test\\.go$"
-      text: "cyclomatic complexity"
-
 linters:
   enable:
-    - govet
-    - errcheck
-    - staticcheck
-    - revive
-    - gofmt
-    - misspell
-    - gocyclo
     - dupl
+    - gocyclo
+    - misspell
+    - revive
   disable:
-    - godox
-    - lll
-    - funlen
-    - wsl
+    - asasalint
+    - bodyclose
+    - cyclop
+    - depguard
     - dogsled
+    - exhaustive
+    - forbidigo
+    - funlen
+    - gocognit
     - goconst
     - gocritic
-    - gosec
-    - depguard
-    - unparam
-    - nakedret
-    - prealloc
-    - exhaustive
-    - nestif
+    - godox
+    - goheader
     - goprintffuncname
-    - gocognit
-    - cyclop
-    - bodyclose
-    - asasalint
+    - gosec
+    - lll
+    - nakedret
+    - nestif
     - nlreturn
     - noctx
-    - rowserrcheck
-    - stylecheck
-    - typecheck
-    - unused
-    - whitespace
-    - wrapcheck
-    - forbidigo
-    - gci
-    - goheader
     - nolintlint
     - paralleltest
+    - prealloc
+    - rowserrcheck
     - testpackage
     - thelper
     - tparallel
     - unconvert
+    - unparam
+    - unused
     - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl
+  settings:
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+    gocyclo:
+      min-complexity: 15
+    misspell:
+      locale: US
+    revive:
+      confidence: 0.8
+      severity: warning
+      rules:
+        - name: var-naming
+        - name: indent-error-flow
+        - name: error-naming
+        - name: if-return
+        - name: import-shadowing
+        - name: range-val-address
+        - name: time-naming
+        - name: unexported-return
+        - name: unused-parameter
+        - name: unused-receiver
+        - name: var-declaration
+        - name: exported
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-strings
+        - name: error-return
+        - name: errorf
+        - name: function-length
+    staticcheck:
+      checks:
+        - all
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - gocyclo
+          - revive
+        path: .*_test\.go$
+      - path: .*_test\.go$
+        text: function-length
+      - path: .*_test\.go$
+        text: cyclomatic complexity
+    paths:
+      - .*_gen.go$
+      - .*_mock.go$
+      - dist
+      - vendor
+      - .git
+      - .github
+      - .vscode
+      - .idea
+      - node_modules
+      - testdata
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: true
+  exclusions:
+    generated: lax
+    paths:
+      - .*_gen.go$
+      - .*_mock.go$
+      - dist
+      - vendor
+      - .git
+      - .github
+      - .vscode
+      - .idea
+      - node_modules
+      - testdata
+      - third_party$
+      - builtin$
+      - examples$
