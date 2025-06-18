@@ -1,7 +1,11 @@
 # OpenMorph
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/developerkunal/OpenMorph/main/.github/logo.png" alt="OpenMorph Logo" width="180"/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/developerkunal/OpenMorph/main/.github/openmorph_darkmode.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/developerkunal/OpenMorph/main/.github/openmorph_lightmode.png">
+    <img src="https://raw.githubusercontent.com/developerkunal/OpenMorph/main/.github/openmorph_lightmode.png" alt="OpenMorph Logo" width="180"/>
+  </picture>
 </p>
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/developerkunal/OpenMorph.svg)](https://pkg.go.dev/github.com/developerkunal/OpenMorph)
