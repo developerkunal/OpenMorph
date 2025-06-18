@@ -60,12 +60,27 @@ type ProcessResult struct {
 
 // DetectPaginationInParams detects pagination strategies in operation parameters
 func DetectPaginationInParams(params *yaml.Node) []DetectedPagination {
+	return DetectPaginationInParamsWithDoc(params, nil)
+}
+
+// DetectPaginationInParamsWithDoc detects pagination strategies in operation parameters with document context for $ref resolution
+func DetectPaginationInParamsWithDoc(params *yaml.Node, doc *yaml.Node) []DetectedPagination {
 	var detected []DetectedPagination
 
 	if params == nil || params.Kind != yaml.SequenceNode {
 		return detected
 	}
 
+	strategyParams := collectStrategyParams(params, doc)
+
+	// Convert to DetectedPagination, filtering out weak strategies
+	detected = filterWeakStrategies(strategyParams)
+
+	return detected
+}
+
+// collectStrategyParams scans through parameters and collects which strategies each parameter belongs to
+func collectStrategyParams(params *yaml.Node, doc *yaml.Node) map[string][]string {
 	strategyParams := make(map[string][]string)
 
 	// Scan through parameters
@@ -74,7 +89,7 @@ func DetectPaginationInParams(params *yaml.Node) []DetectedPagination {
 			continue
 		}
 
-		paramName := getStringValue(param, "name")
+		paramName := extractParameterName(param, doc)
 		if paramName == "" {
 			continue
 		}
@@ -89,23 +104,36 @@ func DetectPaginationInParams(params *yaml.Node) []DetectedPagination {
 		}
 	}
 
-	// Convert to DetectedPagination, filtering out weak strategies
+	return strategyParams
+}
+
+// extractParameterName extracts the parameter name from a param node, handling $ref resolution
+func extractParameterName(param *yaml.Node, doc *yaml.Node) string {
+	var paramName string
+
+	// Handle $ref by resolving it first
+	if ref := getNodeValue(param, "$ref"); ref != nil && doc != nil {
+		refPath := ref.Value
+		resolvedParam := resolveRef(refPath, doc)
+		if resolvedParam != nil {
+			paramName = getStringValue(resolvedParam, "name")
+		}
+	} else {
+		paramName = getStringValue(param, "name")
+	}
+
+	return paramName
+}
+
+// filterWeakStrategies converts strategy params to DetectedPagination, filtering out weak strategies
+func filterWeakStrategies(strategyParams map[string][]string) []DetectedPagination {
+	var detected []DetectedPagination
+
 	// A strategy is considered "weak" if it only has shared parameters
 	sharedParams := findSharedParams()
 
 	for strategy, params := range strategyParams {
-		// Check if this strategy has any non-shared parameters
-		hasNonSharedParams := false
-		for _, param := range params {
-			if !sharedParams[param] {
-				hasNonSharedParams = true
-				break
-			}
-		}
-
-		// Only include strategies that have non-shared parameters
-		// This prevents strategies like "offset" with only "include_totals" from interfering
-		if hasNonSharedParams {
+		if hasNonSharedParams(params, sharedParams) {
 			detected = append(detected, DetectedPagination{
 				Strategy:   strategy,
 				Parameters: params,
@@ -114,6 +142,16 @@ func DetectPaginationInParams(params *yaml.Node) []DetectedPagination {
 	}
 
 	return detected
+}
+
+// hasNonSharedParams checks if a strategy has any non-shared parameters
+func hasNonSharedParams(params []string, sharedParams map[string]bool) bool {
+	for _, param := range params {
+		if !sharedParams[param] {
+			return true
+		}
+	}
+	return false
 }
 
 // findSharedParams identifies parameters that belong to multiple strategies
@@ -255,7 +293,7 @@ func ProcessEndpointWithDoc(operation *yaml.Node, doc *yaml.Node, opts Options) 
 
 // detectPaginationStrategies extracts pagination strategies from params and responses
 func detectPaginationStrategies(params, responses *yaml.Node, doc *yaml.Node) *paginationStrategies {
-	paramPagination := DetectPaginationInParams(params)
+	paramPagination := DetectPaginationInParamsWithDoc(params, doc)
 	responsePagination := DetectPaginationInResponsesWithDoc(responses, doc)
 
 	paramStrategies := make(map[string]bool)
@@ -294,7 +332,7 @@ func needsProcessingCheck(strategies *paginationStrategies, params, responses *y
 		return true
 	}
 
-	if hasOrphanedSharedParams(params, strategies.paramStrategies) {
+	if hasOrphanedSharedParamsWithDoc(params, strategies.paramStrategies, doc) {
 		return true
 	}
 
@@ -317,6 +355,11 @@ func hasResponseCleanupNeeded(strategies *paginationStrategies) bool {
 
 // hasOrphanedSharedParams checks for orphaned shared parameters
 func hasOrphanedSharedParams(params *yaml.Node, paramStrategies map[string]bool) bool {
+	return hasOrphanedSharedParamsWithDoc(params, paramStrategies, nil)
+}
+
+// hasOrphanedSharedParamsWithDoc checks for orphaned shared parameters with document context for $ref resolution
+func hasOrphanedSharedParamsWithDoc(params *yaml.Node, paramStrategies map[string]bool, doc *yaml.Node) bool {
 	if params == nil {
 		return false
 	}
@@ -327,7 +370,20 @@ func hasOrphanedSharedParams(params *yaml.Node, paramStrategies map[string]bool)
 			continue
 		}
 
-		paramName := getStringValue(param, "name")
+		var paramName string
+		var resolvedParam *yaml.Node
+
+		// Handle $ref by resolving it first
+		if ref := getNodeValue(param, "$ref"); ref != nil && doc != nil {
+			refPath := ref.Value
+			resolvedParam = resolveRef(refPath, doc)
+			if resolvedParam != nil {
+				paramName = getStringValue(resolvedParam, "name")
+			}
+		} else {
+			paramName = getStringValue(param, "name")
+		}
+
 		if paramName == "" || !sharedParams[paramName] {
 			continue
 		}
@@ -384,7 +440,7 @@ func selectBestStrategy(strategies *paginationStrategies, opts Options) string {
 // processEndpointCleanup performs the actual cleanup of params and responses
 func processEndpointCleanup(params, responses *yaml.Node, selectedStrategy string, allPagination []DetectedPagination, doc *yaml.Node, result *ProcessResult) (*ProcessResult, error) {
 	if params != nil {
-		removed := removeUnwantedParams(params, selectedStrategy, allPagination)
+		removed := removeUnwantedParamsWithDoc(params, selectedStrategy, allPagination, doc)
 		result.RemovedParams = removed
 		if len(removed) > 0 {
 			result.Changed = true
@@ -405,6 +461,11 @@ func processEndpointCleanup(params, responses *yaml.Node, selectedStrategy strin
 
 // removeUnwantedParams removes parameters that don't match the selected strategy
 func removeUnwantedParams(params *yaml.Node, selectedStrategy string, detected []DetectedPagination) []string {
+	return removeUnwantedParamsWithDoc(params, selectedStrategy, detected, nil)
+}
+
+// removeUnwantedParamsWithDoc removes parameters that don't match the selected strategy with document context for $ref resolution
+func removeUnwantedParamsWithDoc(params *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) []string {
 	var removed []string
 
 	if params.Kind != yaml.SequenceNode {
@@ -420,7 +481,20 @@ func removeUnwantedParams(params *yaml.Node, selectedStrategy string, detected [
 			continue
 		}
 
-		paramName := getStringValue(param, "name")
+		var paramName string
+		var resolvedParam *yaml.Node
+
+		// Handle $ref by resolving it first
+		if ref := getNodeValue(param, "$ref"); ref != nil && doc != nil {
+			refPath := ref.Value
+			resolvedParam = resolveRef(refPath, doc)
+			if resolvedParam != nil {
+				paramName = getStringValue(resolvedParam, "name")
+			}
+		} else {
+			paramName = getStringValue(param, "name")
+		}
+
 		if paramName == "" {
 			newContent = append(newContent, param)
 			continue

@@ -1329,3 +1329,367 @@ func extractParamNames(params *yaml.Node) []string {
 	}
 	return names
 }
+
+// TestProcessEndpointWithRefParams tests that $ref parameters are properly handled
+func TestProcessEndpointWithRefParams(t *testing.T) {
+	// Define a complete OpenAPI document with $ref parameters
+	docYAML := `
+openapi: 3.0.0
+components:
+  parameters:
+    PageParameter:
+      name: page
+      in: query
+      schema:
+        type: integer
+    PerPageParameter:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+    OffsetParameter:
+      name: offset
+      in: query
+      schema:
+        type: integer
+    LimitParameter:
+      name: limit
+      in: query
+      schema:
+        type: integer
+`
+
+	// Parse the document
+	var doc yaml.Node
+	err := yaml.Unmarshal([]byte(docYAML), &doc)
+	if err != nil {
+		t.Fatalf("Failed to parse document YAML: %v", err)
+	}
+
+	// Get the root node for $ref resolution
+	root := doc.Content[0]
+
+	// Test operation with $ref parameters (mixed pagination strategies)
+	operationYAML := `
+parameters:
+  - $ref: "#/components/parameters/PageParameter"
+  - $ref: "#/components/parameters/PerPageParameter"
+  - $ref: "#/components/parameters/OffsetParameter"
+  - $ref: "#/components/parameters/LimitParameter"
+responses:
+  "200":
+    description: Success
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+            page:
+              type: integer
+            per_page:
+              type: integer
+`
+
+	var operation yaml.Node
+	err = yaml.Unmarshal([]byte(operationYAML), &operation)
+	if err != nil {
+		t.Fatalf("Failed to parse operation YAML: %v", err)
+	}
+
+	// Get the operation mapping node from the document node
+	operationMapping := operation.Content[0]
+
+	opts := Options{
+		Priority: []string{"page", "offset", "checkpoint", "cursor", "none"},
+	}
+
+	// Process the endpoint - this should detect both page and offset strategies
+	// and choose page (higher priority), removing offset parameters
+	result, err := ProcessEndpointWithDoc(operationMapping, root, opts)
+	if err != nil {
+		t.Fatalf("ProcessEndpointWithDoc failed: %v", err)
+	}
+
+	if !result.Changed {
+		t.Error("Expected endpoint to be changed")
+	}
+
+	// Should remove offset and limit parameters, keeping page and per_page
+	expectedRemoved := []string{"offset", "limit"}
+	if len(result.RemovedParams) != len(expectedRemoved) {
+		t.Errorf("Expected %d removed parameters, got %d: %v", len(expectedRemoved), len(result.RemovedParams), result.RemovedParams)
+	}
+
+	for _, expected := range expectedRemoved {
+		found := false
+		for _, removed := range result.RemovedParams {
+			if removed == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected parameter %s to be removed", expected)
+		}
+	}
+
+	// Verify that the correct parameters remain
+	params := getNodeValue(operationMapping, "parameters")
+	if params == nil || params.Kind != yaml.SequenceNode {
+		t.Fatal("Expected parameters to be a sequence")
+	}
+
+	// Should have 2 parameters left (page and per_page $refs)
+	if len(params.Content) != 2 {
+		t.Errorf("Expected 2 parameters to remain, got %d", len(params.Content))
+	}
+
+	// Verify the remaining parameters are the correct $refs
+	remainingRefs := make([]string, 0)
+	for _, param := range params.Content {
+		if ref := getNodeValue(param, "$ref"); ref != nil {
+			remainingRefs = append(remainingRefs, ref.Value)
+		}
+	}
+
+	expectedRefs := []string{
+		"#/components/parameters/PageParameter",
+		"#/components/parameters/PerPageParameter",
+	}
+
+	if len(remainingRefs) != len(expectedRefs) {
+		t.Errorf("Expected %d remaining refs, got %d: %v", len(expectedRefs), len(remainingRefs), remainingRefs)
+	}
+
+	for _, expected := range expectedRefs {
+		found := false
+		for _, remaining := range remainingRefs {
+			if remaining == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected ref %s to remain", expected)
+		}
+	}
+}
+
+// TestDetectPaginationWithRefParams tests that $ref parameters are properly detected
+func TestDetectPaginationWithRefParams(t *testing.T) {
+	// Define a complete OpenAPI document with $ref parameters
+	docYAML := `
+openapi: 3.0.0
+components:
+  parameters:
+    PageParameter:
+      name: page
+      in: query
+      schema:
+        type: integer
+    PerPageParameter:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+    OffsetParameter:
+      name: offset
+      in: query
+      schema:
+        type: integer
+    LimitParameter:
+      name: limit
+      in: query
+      schema:
+        type: integer
+`
+
+	// Parse the document
+	var doc yaml.Node
+	err := yaml.Unmarshal([]byte(docYAML), &doc)
+	if err != nil {
+		t.Fatalf("Failed to parse document YAML: %v", err)
+	}
+
+	// Get the root node for $ref resolution
+	root := doc.Content[0]
+
+	// Test parameters with $refs
+	paramsYAML := `
+- $ref: "#/components/parameters/PageParameter"
+- $ref: "#/components/parameters/PerPageParameter"
+- $ref: "#/components/parameters/OffsetParameter"
+- $ref: "#/components/parameters/LimitParameter"
+`
+
+	var params yaml.Node
+	err = yaml.Unmarshal([]byte(paramsYAML), &params)
+	if err != nil {
+		t.Fatalf("Failed to parse params YAML: %v", err)
+	}
+
+	// Get the sequence node from the document node
+	paramsSequence := params.Content[0]
+
+	// Test detection with doc context
+	detected := DetectPaginationInParamsWithDoc(paramsSequence, root)
+
+	t.Logf("Detected strategies: %v", detected)
+
+	// Should detect both page and offset strategies
+	expectedStrategies := []string{"page", "offset"}
+	if len(detected) != len(expectedStrategies) {
+		t.Errorf("Expected %d strategies, got %d", len(expectedStrategies), len(detected))
+	}
+
+	for _, expected := range expectedStrategies {
+		found := false
+		for _, d := range detected {
+			if d.Strategy == expected {
+				found = true
+				t.Logf("Found strategy %s with params: %v", d.Strategy, d.Parameters)
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected strategy %s not found", expected)
+		}
+	}
+}
+
+// TestDetectPaginationWithRefParamsDebug tests with debug output
+func TestDetectPaginationWithRefParamsDebug(t *testing.T) {
+	docYAML := `
+openapi: 3.0.0
+components:
+  parameters:
+    PageParameter:
+      name: page
+      in: query
+      schema:
+        type: integer
+`
+
+	var doc yaml.Node
+	err := yaml.Unmarshal([]byte(docYAML), &doc)
+	if err != nil {
+		t.Fatalf("Failed to parse document YAML: %v", err)
+	}
+
+	root := doc.Content[0]
+
+	paramsYAML := `
+- $ref: "#/components/parameters/PageParameter"
+`
+
+	var params yaml.Node
+	err = yaml.Unmarshal([]byte(paramsYAML), &params)
+	if err != nil {
+		t.Fatalf("Failed to parse params YAML: %v", err)
+	}
+
+	// Debug the structure
+	t.Logf("Params Kind: %v", params.Kind)
+	t.Logf("Params Content Length: %d", len(params.Content))
+
+	if len(params.Content) > 0 {
+		param := params.Content[0]
+		t.Logf("First param Kind: %v", param.Kind)
+
+		// Check for $ref
+		ref := getNodeValue(param, "$ref")
+		if ref != nil {
+			t.Logf("Found $ref: %s", ref.Value)
+
+			// Try to resolve it
+			resolved := resolveRef(ref.Value, root)
+			if resolved != nil {
+				t.Logf("Successfully resolved $ref")
+				name := getStringValue(resolved, "name")
+				t.Logf("Resolved name: %s", name)
+			} else {
+				t.Log("Failed to resolve $ref")
+			}
+		} else {
+			t.Log("No $ref found")
+		}
+	}
+
+	// Test detection
+	detected := DetectPaginationInParamsWithDoc(&params, root)
+	t.Logf("Detected strategies: %v", detected)
+}
+
+// TestParamsYAMLStructure tests the structure of the params YAML
+func TestParamsYAMLStructure(t *testing.T) {
+	paramsYAML := `
+- $ref: "#/components/parameters/PageParameter"
+- name: inline_param
+  in: query
+  schema:
+    type: string
+`
+
+	var params yaml.Node
+	err := yaml.Unmarshal([]byte(paramsYAML), &params)
+	if err != nil {
+		t.Fatalf("Failed to parse params YAML: %v", err)
+	}
+
+	t.Logf("Params Kind: %v", params.Kind)
+	t.Logf("Params Content Length: %d", len(params.Content))
+
+	for i, param := range params.Content {
+		t.Logf("Param %d Kind: %v", i, param.Kind)
+		t.Logf("Param %d Content Length: %d", i, len(param.Content))
+
+		if param.Kind == yaml.MappingNode {
+			for j := 0; j < len(param.Content); j += 2 {
+				key := param.Content[j].Value
+				value := param.Content[j+1].Value
+				t.Logf("  %s: %s", key, value)
+			}
+		}
+	}
+}
+
+// TestParamsYAMLStructureFixed tests the corrected structure access
+func TestParamsYAMLStructureFixed(t *testing.T) {
+	paramsYAML := `
+- $ref: "#/components/parameters/PageParameter"
+- name: inline_param
+  in: query
+  schema:
+    type: string
+`
+
+	var params yaml.Node
+	err := yaml.Unmarshal([]byte(paramsYAML), &params)
+	if err != nil {
+		t.Fatalf("Failed to parse params YAML: %v", err)
+	}
+
+	// The params node is a DocumentNode, we need the SequenceNode inside it
+	if params.Kind == yaml.DocumentNode && len(params.Content) > 0 {
+		sequence := params.Content[0]
+		t.Logf("Sequence Kind: %v", sequence.Kind)
+		t.Logf("Sequence Content Length: %d", len(sequence.Content))
+
+		for i, param := range sequence.Content {
+			t.Logf("Param %d Kind: %v", i, param.Kind)
+			t.Logf("Param %d Content Length: %d", i, len(param.Content))
+
+			if param.Kind == yaml.MappingNode {
+				for j := 0; j < len(param.Content); j += 2 {
+					key := param.Content[j].Value
+					value := param.Content[j+1].Value
+					t.Logf("  %s: %s", key, value)
+				}
+			}
+		}
+	}
+}
