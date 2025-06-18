@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/developerkunal/OpenMorph/internal/pagination"
 	"gopkg.in/yaml.v3"
+
+	"github.com/developerkunal/OpenMorph/internal/pagination"
 )
 
 // PaginationOptions extends the regular Options with pagination-specific settings
@@ -150,7 +151,7 @@ func writeModifiedDocument(doc *yaml.Node, path string) (bool, error) {
 		return false, err
 	}
 
-	if err := os.WriteFile(path, output, 0644); err != nil {
+	if err := os.WriteFile(path, output, 0600); err != nil {
 		return false, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -465,6 +466,7 @@ func handleSequenceNode(node *yaml.Node, indent int) ([]byte, error) {
 		return []byte("[]"), nil
 	}
 
+	// Always use multi-line formatting for consistency
 	indentStr := strings.Repeat("  ", indent)
 	nextIndentStr := strings.Repeat("  ", indent+1)
 

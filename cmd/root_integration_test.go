@@ -15,12 +15,12 @@ func TestCLI_TransformDryRun(t *testing.T) {
 	}
 	defer os.RemoveAll("../testdata")
 	file := dir + "/test.yaml"
-	if err := os.WriteFile(file, []byte("x-a: 1\nx-b: 2\n"), 0644); err != nil {
+	if err := os.WriteFile(file, []byte("x-a: 1\nx-b: 2\n"), 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	// Create a mapping config
 	cfg := "../testdata/mapping.yaml"
-	if err := os.WriteFile(cfg, []byte("mappings:\n  x-a: x-z\n"), 0644); err != nil {
+	if err := os.WriteFile(cfg, []byte("mappings:\n  x-a: x-z\n"), 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 

@@ -10,6 +10,8 @@ linters:
     - gocyclo
     - misspell
     - revive
+    - gosec # Security checks
+    - unused # Unused code detection
   disable:
     - asasalint
     - bodyclose
@@ -25,7 +27,6 @@ linters:
     - godox
     - goheader
     - goprintffuncname
-    - gosec
     - lll
     - nakedret
     - nestif
@@ -40,7 +41,6 @@ linters:
     - tparallel
     - unconvert
     - unparam
-    - unused
     - wastedassign
     - whitespace
     - wrapcheck
@@ -54,6 +54,11 @@ linters:
       min-complexity: 15
     misspell:
       locale: US
+    gofmt:
+      simplify: true
+    gosec:
+      confidence: medium
+      severity: medium
     revive:
       confidence: 0.8
       severity: warning

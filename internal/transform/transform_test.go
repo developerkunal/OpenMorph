@@ -40,7 +40,7 @@ func TestEqualBytes(t *testing.T) {
 func TestTransformFileDryRun(t *testing.T) {
 	f := "test.json"
 	input := `{"x-a": 1}`
-	if err := os.WriteFile(f, []byte(input), 0644); err != nil {
+	if err := os.WriteFile(f, []byte(input), 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)
@@ -56,7 +56,7 @@ func TestTransformFileDryRun(t *testing.T) {
 
 func TestTransformFileBackup(t *testing.T) {
 	f := "test.yaml"
-	if err := os.WriteFile(f, []byte("x-a: 1\n"), 0644); err != nil {
+	if err := os.WriteFile(f, []byte("x-a: 1\n"), 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)
@@ -77,7 +77,7 @@ func TestTransformFileJSON(t *testing.T) {
 	f := "test.json"
 	input := `{"x-a": 1, "x-b": {"x-c": 2}}`
 	expected := `{"x-z": 1, "x-b": {"x-y": 2}}`
-	if err := os.WriteFile(f, []byte(input), 0644); err != nil {
+	if err := os.WriteFile(f, []byte(input), 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)

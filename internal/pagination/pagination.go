@@ -177,26 +177,6 @@ func findSharedParams() map[string]bool {
 }
 
 // findSharedFields identifies fields that belong to multiple strategies
-func findSharedFields() map[string]bool {
-	sharedFields := make(map[string]bool)
-	fieldCount := make(map[string]int)
-
-	// Count how many strategies each field appears in
-	for _, strategy := range PaginationStrategies {
-		for _, field := range strategy.Fields {
-			fieldCount[field]++
-		}
-	}
-
-	// Mark fields that appear in multiple strategies as shared
-	for field, count := range fieldCount {
-		if count > 1 {
-			sharedFields[field] = true
-		}
-	}
-
-	return sharedFields
-}
 
 // DetectPaginationInResponses detects pagination strategies in operation responses
 func DetectPaginationInResponses(responses *yaml.Node) []DetectedPagination {
@@ -354,9 +334,6 @@ func hasResponseCleanupNeeded(strategies *paginationStrategies) bool {
 }
 
 // hasOrphanedSharedParams checks for orphaned shared parameters
-func hasOrphanedSharedParams(params *yaml.Node, paramStrategies map[string]bool) bool {
-	return hasOrphanedSharedParamsWithDoc(params, paramStrategies, nil)
-}
 
 // hasOrphanedSharedParamsWithDoc checks for orphaned shared parameters with document context for $ref resolution
 func hasOrphanedSharedParamsWithDoc(params *yaml.Node, paramStrategies map[string]bool, doc *yaml.Node) bool {
@@ -460,9 +437,6 @@ func processEndpointCleanup(params, responses *yaml.Node, selectedStrategy strin
 }
 
 // removeUnwantedParams removes parameters that don't match the selected strategy
-func removeUnwantedParams(params *yaml.Node, selectedStrategy string, detected []DetectedPagination) []string {
-	return removeUnwantedParamsWithDoc(params, selectedStrategy, detected, nil)
-}
 
 // removeUnwantedParamsWithDoc removes parameters that don't match the selected strategy with document context for $ref resolution
 func removeUnwantedParamsWithDoc(params *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) []string {
@@ -579,9 +553,6 @@ func belongsToAnyPaginationStrategy(paramName, selectedStrategy string, detected
 }
 
 // removeUnwantedResponses removes or modifies responses that contain unwanted pagination
-func removeUnwantedResponses(responses *yaml.Node, selectedStrategy string, detected []DetectedPagination) ([]string, []string) {
-	return removeUnwantedResponsesWithDoc(responses, selectedStrategy, detected, nil)
-}
 
 // removeUnwantedResponsesWithDoc removes or modifies responses with document context for $ref resolution
 func removeUnwantedResponsesWithDoc(responses *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) ([]string, []string) {
@@ -721,9 +692,6 @@ func fieldBelongsToNonSelectedPaginationStrategy(field, selectedStrategy string)
 }
 
 // cleanResponseSchema removes unwanted pagination fields from response schemas
-func cleanResponseSchema(response *yaml.Node, selectedStrategy string, detected []DetectedPagination) []string {
-	return cleanResponseSchemaWithDoc(response, selectedStrategy, detected, nil)
-}
 
 // cleanResponseSchemaWithDoc removes unwanted pagination fields with document context
 func cleanResponseSchemaWithDoc(response *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) []string {
@@ -755,9 +723,6 @@ func cleanResponseSchemaWithDoc(response *yaml.Node, selectedStrategy string, de
 }
 
 // cleanSchemaNode recursively cleans a schema node
-func cleanSchemaNode(schema *yaml.Node, selectedStrategy string, detected []DetectedPagination) []string {
-	return cleanSchemaNodeWithDoc(schema, selectedStrategy, detected, nil)
-}
 
 // cleanSchemaNodeWithDoc recursively cleans a schema node with document context
 func cleanSchemaNodeWithDoc(schema *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) []string {
@@ -808,9 +773,6 @@ func cleanSchemaNodeWithDoc(schema *yaml.Node, selectedStrategy string, detected
 }
 
 // cleanCompositionNode cleans oneOf/anyOf/allOf nodes
-func cleanCompositionNode(composition *yaml.Node, selectedStrategy string, detected []DetectedPagination) bool {
-	return cleanCompositionNodeWithDoc(composition, selectedStrategy, detected, nil)
-}
 
 // cleanCompositionNodeWithDoc cleans oneOf/anyOf/allOf nodes with document context
 func cleanCompositionNodeWithDoc(composition *yaml.Node, selectedStrategy string, detected []DetectedPagination, doc *yaml.Node) bool {
@@ -1022,9 +984,6 @@ func belongsToAnyNonSelectedStrategy(propName, selectedStrategy string) bool {
 }
 
 // shouldKeepSchemaItem determines if a schema item should be kept
-func shouldKeepSchemaItem(item *yaml.Node, selectedStrategy string, detected []DetectedPagination) bool {
-	return shouldKeepSchemaItemWithDoc(item, selectedStrategy, detected, nil)
-}
 
 // shouldKeepSchemaItemWithDoc determines if a schema item should be kept with document context
 func shouldKeepSchemaItemWithDoc(item *yaml.Node, selectedStrategy string, _ []DetectedPagination, doc *yaml.Node) bool {

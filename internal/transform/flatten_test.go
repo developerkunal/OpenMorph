@@ -60,7 +60,7 @@ paths:
 
 	// Create temp file
 	tmpFile := "test_flatten.yaml"
-	if err := os.WriteFile(tmpFile, []byte(input), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(input), 0600); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 	defer os.Remove(tmpFile)
@@ -194,7 +194,7 @@ components:
 
 	// Create temp file
 	tmpFile := "test_flatten_anyof.yaml"
-	if err := os.WriteFile(tmpFile, []byte(input), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(input), 0600); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 	defer os.Remove(tmpFile)
@@ -279,7 +279,7 @@ components:
 
 	// Create temp file
 	tmpFile := "test_no_flatten.yaml"
-	if err := os.WriteFile(tmpFile, []byte(input), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(input), 0600); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 	defer os.Remove(tmpFile)
@@ -366,7 +366,7 @@ paths:
 
 	// Create temp file
 	tmpFile := "test_flatten_response.yaml"
-	if err := os.WriteFile(tmpFile, []byte(input), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(input), 0600); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 	defer os.Remove(tmpFile)

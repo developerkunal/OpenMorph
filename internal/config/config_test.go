@@ -7,7 +7,7 @@ import (
 
 func TestLoadConfig_FileAndInline(t *testing.T) {
 	f := "test.yaml"
-	if err := os.WriteFile(f, []byte("input: bar\nmappings:\n  x-a: x-b\n  x-c: x-d\n"), 0644); err != nil {
+	if err := os.WriteFile(f, []byte("input: bar\nmappings:\n  x-a: x-b\n  x-c: x-d\n"), 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)
@@ -26,7 +26,7 @@ func TestLoadConfig_FileAndInline(t *testing.T) {
 func TestLoadConfig_RC(t *testing.T) {
 	f := ".openapirc.yaml"
 	cfgYaml := "input: foo\nmappings:\n  x-a: x-b\n"
-	if err := os.WriteFile(f, []byte(cfgYaml), 0644); err != nil {
+	if err := os.WriteFile(f, []byte(cfgYaml), 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)

@@ -13,7 +13,7 @@ func TestCLI_Help(t *testing.T) {
 	if err != nil && !testing.Short() {
 		t.Fatalf("help failed: %v\n%s", err, out)
 	}
-	if len(out) == 0 || string(out) == "" {
+	if len(out) == 0 {
 		t.Error("expected help output")
 	}
 }

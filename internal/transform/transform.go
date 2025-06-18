@@ -77,9 +77,9 @@ func FileWithChanges(path string, opts Options, changes *[]KeyChange) (bool, err
 		}
 		if changed {
 			if opts.Backup {
-				_ = os.WriteFile(path+".bak", orig, 0644)
+				_ = os.WriteFile(path+".bak", orig, 0600)
 			}
-			return true, os.WriteFile(path, patched, 0644)
+			return true, os.WriteFile(path, patched, 0600)
 		}
 		return false, nil
 	}
@@ -106,9 +106,9 @@ func FileWithChanges(path string, opts Options, changes *[]KeyChange) (bool, err
 	if opts.Backup {
 		absPath, _ := filepath.Abs(path + ".bak")
 		fmt.Fprintf(os.Stderr, "[DEBUG] Writing backup file: %s\n", absPath)
-		_ = os.WriteFile(path+".bak", orig, 0644)
+		_ = os.WriteFile(path+".bak", orig, 0600)
 	}
-	return !equalBytes(orig, out), os.WriteFile(path, out, 0644)
+	return !equalBytes(orig, out), os.WriteFile(path, out, 0600)
 }
 
 // patchJSONKeysWithChanges is like patchJSONKeys, but records changes.
@@ -323,7 +323,7 @@ func IsJSON(path string) bool {
 }
 
 func equalBytes(a, b []byte) bool {
-	return string(a) == string(b)
+	return bytes.Equal(a, b)
 }
 
 // Restore shouldExclude for tests

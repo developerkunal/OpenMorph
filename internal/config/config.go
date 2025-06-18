@@ -15,6 +15,36 @@ type Config struct {
 	Mappings           map[string]string `yaml:"mappings" json:"mappings"`
 	PaginationPriority []string          `yaml:"pagination_priority" json:"pagination_priority"`
 	FlattenResponses   bool              `yaml:"flatten_responses" json:"flatten_responses"`
+	VendorExtensions   VendorExtensions  `yaml:"vendor_extensions" json:"vendor_extensions"`
+}
+
+// VendorExtensions configuration for adding vendor-specific extensions
+type VendorExtensions struct {
+	Enabled   bool                      `yaml:"enabled" json:"enabled"`
+	Providers map[string]ProviderConfig `yaml:"providers" json:"providers"`
+}
+
+// ProviderConfig defines configuration for a specific provider
+type ProviderConfig struct {
+	ExtensionName string                    `yaml:"extension_name" json:"extension_name"`
+	TargetLevel   string                    `yaml:"target_level" json:"target_level"`   // "operation", "path", "schema"
+	Methods       []string                  `yaml:"methods" json:"methods"`             // ["get", "post"] or empty for all
+	PathPatterns  []string                  `yaml:"path_patterns" json:"path_patterns"` // ["/api/v1/*"] or empty for all
+	FieldMapping  FieldMapping              `yaml:"field_mapping" json:"field_mapping"`
+	Strategies    map[string]StrategyConfig `yaml:"strategies" json:"strategies"`
+}
+
+// FieldMapping defines how to map request/response fields
+type FieldMapping struct {
+	RequestParams  map[string][]string `yaml:"request_params" json:"request_params"`
+	ResponseFields map[string][]string `yaml:"response_fields" json:"response_fields"`
+}
+
+// StrategyConfig defines the template for a pagination strategy
+type StrategyConfig struct {
+	Template       map[string]interface{} `yaml:"template" json:"template"`
+	RequiredFields []string               `yaml:"required_fields" json:"required_fields"`
+	OptionalFields []string               `yaml:"optional_fields" json:"optional_fields"`
 }
 
 // LoadConfig loads config from file (YAML/JSON) and merges with inline flags. If noConfig is true, ignores all config files and uses only CLI flags.

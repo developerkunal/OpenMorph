@@ -10,11 +10,13 @@
 
 ---
 
-OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor extension keys across YAML/JSON files. It supports interactive review, dry-run previews, backups, robust mapping/exclusion logic, and is designed for maintainability and extensibility.
+OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor extension keys across YAML/JSON files. It supports interactive review, dry-run previews, backups, robust mapping/exclusion logic, vendor-specific pagination extensions, and is designed for maintainability and extensibility.
 
 ## Features
 
 - Transform OpenAPI vendor extension keys in YAML/JSON
+- **Vendor-specific pagination extensions** - Auto-inject Fern, Speakeasy, and other vendor pagination metadata
+- **Auto-detection of array fields** - Automatically find results arrays in response schemas
 - Interactive TUI for reviewing and approving changes
 - Colorized before/after diffs (CLI and TUI)
 - Dry-run mode for safe previews
@@ -23,6 +25,7 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 - Exclude keys from transformation
 - OpenAPI validation integration
 - **Pagination priority support** - Remove lower-priority pagination strategies
+- **Consistent JSON formatting** - Maintains clean, multi-line array formatting
 - Modern, maintainable Go codebase
 
 ## Credits / Acknowledgements
@@ -102,6 +105,8 @@ openmorph [flags]
 | `--no-config`           | Ignore all config files and use only CLI flags.                                        |
 | `--validate`            | Run OpenAPI validation (requires `swagger-cli` in PATH).                               |
 | `--pagination-priority` | Pagination strategy priority order (e.g., checkpoint,offset,page,cursor,none).         |
+| `--vendor-providers`    | Specific vendor providers to apply (e.g., fern,speakeasy). If empty, applies all.      |
+| `--flatten-responses`   | Flatten oneOf/anyOf/allOf with single $ref after pagination processing.                |
 | `--version`             | Show version and exit.                                                                 |
 | `-h`, `--help`          | Show help message.                                                                     |
 
@@ -153,6 +158,25 @@ pagination_priority:
   - page
   - cursor
   - none
+vendor_extensions:
+  enabled: true
+  providers:
+    fern:
+      extension_name: "x-fern-pagination"
+      target_level: "operation"
+      methods: ["get"]
+      field_mapping:
+        request_params:
+          cursor: ["cursor", "after"]
+          limit: ["limit", "size"]
+      strategies:
+        cursor:
+          template:
+            type: "cursor"
+            cursor_param: "$request.{cursor_param}"
+            page_size_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["cursor_param", "results_field"]
 ```
 
 ### Example: With Backup
@@ -167,6 +191,34 @@ openmorph --input ./openapi --mapping x-foo=x-bar --backup
 openmorph --input ./openapi --mapping x-foo=x-bar --validate
 ```
 
+### Example: Add Vendor Extensions
+
+Add vendor extensions (auto-enabled when configured):
+
+```sh
+openmorph --input ./openapi --config fern-config.yaml
+```
+
+Add extensions for specific providers only:
+
+```sh
+openmorph --input ./openapi --vendor-providers fern --config config.yaml
+```
+
+### Example: Complete Transformation
+
+Transform keys, clean up pagination, and add vendor extensions:
+
+```sh
+openmorph --input ./openapi \
+  --mapping x-operation-group-name=x-fern-sdk-group-name \
+  --pagination-priority cursor,offset,none \
+  --vendor-providers fern \
+  --flatten-responses \
+  --backup \
+  --config ./config.yaml
+```
+
 ### Example: Pagination Priority
 
 Transform APIs to use only checkpoint pagination (highest priority):
@@ -175,10 +227,14 @@ Transform APIs to use only checkpoint pagination (highest priority):
 openmorph --input ./openapi --pagination-priority checkpoint,offset,none
 ```
 
-Remove lower-priority pagination strategies:
+Remove lower-priority pagination strategies and add vendor extensions:
 
 ```sh
-openmorph --input ./openapi --pagination-priority cursor,page,offset,none --dry-run
+openmorph --input ./openapi \
+  --pagination-priority cursor,page,offset,none \
+  --vendor-providers fern \
+  --config fern-config.yaml \
+  --dry-run
 ```
 
 ## Pagination Priority
@@ -247,6 +303,182 @@ When pagination priority is configured, OpenMorph:
               properties:
                 next: { type: string }
                 users: { type: array }
+```
+
+## Vendor Extensions
+
+OpenMorph provides powerful vendor-specific extension injection capabilities, automatically adding pagination metadata like `x-fern-pagination` to your OpenAPI specifications. The system is provider-agnostic, configurable, and includes intelligent auto-detection of pagination patterns and array fields.
+
+> **📝 Configuration Required**: Vendor extensions are configured via config files only (not CLI flags) due to their complexity. This design ensures maintainability, reusability, and supports advanced features like multiple providers, strategies, and field mappings.
+
+### Key Features
+
+- **Generic & Extensible** - Provider-agnostic configuration system supporting any vendor
+- **Auto-Detection** - Automatically detects pagination patterns and result array fields
+- **Smart Field Mapping** - Flexible parameter and response field mapping
+- **Template-Based** - Configurable templates for vendor-specific extensions
+- **Format Preservation** - Maintains consistent JSON/YAML formatting
+- **Multi-Strategy Support** - Supports cursor, offset, page, and checkpoint pagination
+- **Config-File Based** - Rich configuration via YAML/JSON for maximum flexibility
+
+### Supported Vendors
+
+- **Fern** - Adds `x-fern-pagination` extensions with full strategy support
+- **Extensible Architecture** - Easy to add Speakeasy, OpenAPI Generator, and other vendors
+
+### How It Works
+
+1. **Scans API Operations** - Analyzes GET endpoints for pagination parameters
+2. **Auto-Detects Strategies** - Identifies cursor, offset, page, and checkpoint patterns
+3. **Finds Result Arrays** - Automatically locates array fields in response schemas (`data`, `items`, `results`, etc.)
+4. **Applies Templates** - Uses configurable templates to generate vendor extensions
+5. **Preserves Structure** - Maintains original OpenAPI formatting and structure
+
+### Configuration
+
+Vendor extensions are configured through the config file using the `vendor_extensions` section:
+
+```yaml
+vendor_extensions:
+  enabled: true
+  providers:
+    fern:
+      extension_name: "x-fern-pagination"
+      target_level: "operation" # operation | path | global
+      methods: ["get"] # HTTP methods to process
+      field_mapping:
+        request_params:
+          cursor: ["cursor", "next_cursor", "after"]
+          limit: ["limit", "size", "page_size", "per_page", "take"]
+          offset: ["offset", "skip"]
+          page: ["page", "page_number"]
+          # results field mapping not needed - auto-detected!
+      strategies:
+        cursor:
+          template:
+            type: "cursor"
+            cursor_param: "$request.{cursor_param}"
+            page_size_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["cursor_param", "results_field"]
+        offset:
+          template:
+            type: "offset"
+            offset_param: "$request.{offset_param}"
+            limit_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["offset_param", "results_field"]
+        page:
+          template:
+            type: "page"
+            page_param: "$request.{page_param}"
+            page_size_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["page_param", "results_field"]
+        checkpoint:
+          template:
+            type: "checkpoint"
+            cursor_param: "$request.{cursor_param}"
+            page_size_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["cursor_param", "results_field"]
+```
+
+### Usage Examples
+
+**Add vendor extensions to all APIs:**
+
+```sh
+openmorph --input ./openapi --config config.yaml
+```
+
+**Add extensions for specific providers only:**
+
+```sh
+openmorph --input ./openapi --vendor-providers fern --config config.yaml
+```
+
+**Combine with other transformations:**
+
+```sh
+openmorph --input ./openapi \
+  --mapping x-operation-group-name=x-fern-sdk-group-name \
+  --vendor-providers fern \
+  --pagination-priority cursor,offset,none \
+  --flatten-responses \
+  --backup \
+  --config config.yaml
+```
+
+**Preview changes with dry-run:**
+
+```sh
+openmorph --input ./openapi --dry-run --config config.yaml
+```
+
+> **💡 Pro Tip**: Vendor extensions auto-enable when configured in your config file. The `--vendor-providers` flag filters which providers from your config are applied, allowing you to test specific vendors without modifying your config file.
+
+### Auto-Detection Features
+
+**Array Field Detection**: Automatically finds array fields in response schemas:
+
+- `data`, `items`, `results`, `users`, `products`, etc.
+- Works with complex schemas including `$ref`, `oneOf`, `anyOf`, `allOf`
+- No manual configuration required!
+
+**Parameter Mapping**: Maps request parameters to template variables:
+
+- `cursor` → `$request.cursor`
+- `limit` → `$request.limit`
+- `page` → `$request.page`
+
+### Example Output
+
+**Before:**
+
+```yaml
+/users:
+  get:
+    parameters:
+      - name: cursor
+        in: query
+      - name: size
+        in: query
+    responses:
+      "200":
+        content:
+          application/json:
+            schema:
+              properties:
+                data:
+                  type: array
+                  items: { type: object }
+```
+
+**After:**
+
+```yaml
+/users:
+  get:
+    parameters:
+      - name: cursor
+        in: query
+      - name: size
+        in: query
+    responses:
+      "200":
+        content:
+          application/json:
+            schema:
+              properties:
+                data:
+                  type: array
+                  items: { type: object }
+    x-fern-pagination:
+      type: "cursor"
+      cursor_param: "$request.cursor"
+      page_size_param: "$request.size"
+      results_path: "$response.data"
 ```
 
 ## Interactive TUI Controls

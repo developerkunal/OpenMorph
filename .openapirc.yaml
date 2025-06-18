@@ -1,8 +1,70 @@
+# OpenMorph Default Configuration
+# This file demonstrates vendor extension configuration with auto-detection features
+
+# Basic settings
 input: ./openapi
 backup: true
 validate: true
+
+# Key transformations
 exclude:
   - x-ignore
+  - x-internal # Example of excluding internal extensions
 mappings:
   x-operation-group-name: x-fern-sdk-group-name
   x-tag: x-fern-tag
+  x-group: x-fern-sdk-group-name # Additional Fern mapping
+
+# Pagination priority (optional - removes lower priority strategies)
+pagination_priority:
+  - cursor
+  - offset
+  - page
+  - checkpoint
+  - none
+
+# Vendor extension configuration
+vendor_extensions:
+  enabled: true
+  providers:
+    fern:
+      extension_name: "x-fern-pagination"
+      target_level: "operation" # operation | path | global
+      methods: ["get"] # HTTP methods to process
+      field_mapping:
+        request_params:
+          # Auto-maps parameters to template variables
+          cursor: ["cursor", "next_cursor", "after"]
+          limit: ["limit", "size", "page_size", "per_page", "take"]
+          offset: ["offset", "skip"]
+          page: ["page", "page_number"]
+          # Note: No results field mapping needed - auto-detected from response schemas!
+      strategies:
+        cursor:
+          template:
+            type: "cursor"
+            cursor_param: "$request.{cursor_param}"
+            page_size_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["cursor_param", "results_field"]
+        offset:
+          template:
+            type: "offset"
+            offset_param: "$request.{offset_param}"
+            limit_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["offset_param", "results_field"]
+        page:
+          template:
+            type: "page"
+            page_param: "$request.{page_param}"
+            page_size_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["page_param", "results_field"]
+        checkpoint:
+          template:
+            type: "checkpoint"
+            cursor_param: "$request.{cursor_param}"
+            page_size_param: "$request.{limit_param}"
+            results_path: "$response.{results_field}"
+          required_fields: ["cursor_param", "results_field"]

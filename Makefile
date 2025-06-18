@@ -4,7 +4,7 @@ BINARY=openmorph
 VERSION_FILE=.version
 VERSION=$(shell cat $(VERSION_FILE) 2>/dev/null || echo "0.0.0")
 
-.PHONY: all build test lint release clean install version-show version-bump-patch version-bump-minor version-bump-major version-set version-tag version-release
+.PHONY: all build test lint format lint-fix lint-all release clean install version-show version-bump-patch version-bump-minor version-bump-major version-set version-tag version-release
 
 all: build
 
@@ -14,8 +14,32 @@ build:
 test:
 	go test ./... -v
 
+# Format code using gofmt and goimports
+format:
+	@echo "🎨 Formatting Go code..."
+	@gofmt -s -w .
+	@if command -v goimports >/dev/null 2>&1; then \
+		goimports -w -local github.com/developerkunal/OpenMorph .; \
+	else \
+		echo "⚠️  goimports not found. Install with: go install golang.org/x/tools/cmd/goimports@latest"; \
+	fi
+	@echo "✅ Code formatting completed"
+
+# Run linters (reports issues)
 lint:
-	golangci-lint run
+	@echo "🔍 Running linters..."
+	@golangci-lint run
+	@echo "✅ Linting completed"
+
+# Lint and auto-fix issues where possible
+lint-fix:
+	@echo "🔧 Running linters with auto-fix..."
+	@golangci-lint run --fix
+	@echo "✅ Linting with auto-fix completed"
+
+# Format code and run linters (complete code quality check)
+lint-all: format lint
+	@echo "🎯 Complete code quality check completed"
 
 release:
 	goreleaser release --clean
