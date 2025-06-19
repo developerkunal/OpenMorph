@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,39 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 )
-
-const (
-	colorReset  = "\033[0m"
-	colorBold   = "\033[1m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorCyan   = "\033[36m"
-	colorBlue   = "\033[34m"
-	colorPurple = "\033[35m"
-	colorRed    = "\033[31m"
-)
-
-// version is set by GoReleaser at build time. Do not update manually.
-var version = "dev"
-
-// getVersion returns the current version, preferring build-time version,
-// then falling back to .version file, then "dev"
-func getVersion() string {
-	// If version was set at build time (not "dev"), use it
-	if version != "dev" {
-		return version
-	}
-
-	// Try to read from .version file
-	if content, err := os.ReadFile(".version"); err == nil {
-		if v := strings.TrimSpace(string(content)); v != "" {
-			return "v" + v
-		}
-	}
-
-	// Fallback to "dev"
-	return "dev"
-}
 
 var (
 	inputDir   string
@@ -60,19 +26,23 @@ var (
 	interactive           bool
 	paginationPriorityStr string
 	flattenResponses      bool
+	verbose               bool
 
 	// Vendor extension flags
 	vendorProviders []string
+
+	// Default values flags
+	setDefaults bool
 )
 
 var rootCmd = &cobra.Command{
 	Use:     "openmorph",
 	Short:   "Transform OpenAPI vendor extension keys via mapping",
-	Long:    `OpenMorph: Transform OpenAPI vendor extension keys in YAML/JSON files via mapping config or inline args.`,
-	Version: getVersion(),
+	Long:    `OpenMorph: Transform OpenAPI vendor extension keys in YAML/JSON files via mapping config or inline args. Features vendor extensions, default values, response flattening, and more.`,
+	Version: GetVersion(),
 	Run: func(cmd *cobra.Command, _ []string) {
 		if cmd.Flag("version") != nil && cmd.Flag("version").Changed {
-			fmt.Println("OpenMorph version:", getVersion())
+			fmt.Println("OpenMorph version:", GetVersion())
 			return
 		}
 		cfg, err := config.LoadConfig(configFile, inlineMaps, inputDir, noConfig)
@@ -93,6 +63,9 @@ var rootCmd = &cobra.Command{
 		if cmd.Flag("flatten-responses") != nil && cmd.Flag("flatten-responses").Changed {
 			cfg.FlattenResponses = flattenResponses
 		}
+		if cmd.Flag("set-defaults") != nil && cmd.Flag("set-defaults").Changed {
+			cfg.DefaultValues.Enabled = setDefaults
+		}
 		if paginationPriorityStr != "" {
 			// Parse comma-separated pagination priority
 			priorities := strings.Split(paginationPriorityStr, ",")
@@ -102,51 +75,8 @@ var rootCmd = &cobra.Command{
 			cfg.PaginationPriority = priorities
 		}
 
-		// Pretty-print config summary
-		fmt.Printf("\n🔧 %sOpenMorph Configuration%s\n", colorBold, colorReset)
-		fmt.Printf("═══════════════════════════════════\n")
-
-		// Core settings
-		fmt.Printf("📁 %sInput:%s         %s%s%s\n", colorCyan, colorReset, colorGreen, cfg.Input, colorReset)
-		fmt.Printf("💾 %sBackup:%s        %s%v%s\n", colorCyan, colorReset, getStatusColor(cfg.Backup), cfg.Backup, colorReset)
-		fmt.Printf("✅ %sValidate:%s      %s%v%s\n", colorCyan, colorReset, getStatusColor(cfg.Validate), cfg.Validate, colorReset)
-		fmt.Printf("🔄 %sFlatten:%s       %s%v%s\n", colorCyan, colorReset, getStatusColor(cfg.FlattenResponses), cfg.FlattenResponses, colorReset)
-
-		// Exclude list
-		if len(cfg.Exclude) > 0 {
-			fmt.Printf("🚫 %sExclude:%s       %s%v%s\n", colorCyan, colorReset, colorYellow, cfg.Exclude, colorReset)
-		}
-
-		// Pagination priority
-		if len(cfg.PaginationPriority) > 0 {
-			fmt.Printf("📊 %sPagination:%s    %s%v%s\n", colorCyan, colorReset, colorPurple, cfg.PaginationPriority, colorReset)
-		}
-
-		// Vendor extensions
-		if cfg.VendorExtensions.Enabled {
-			fmt.Printf("🏷️  %sVendor Ext:%s    %s%s%s\n", colorCyan, colorReset, colorGreen, "Enabled", colorReset)
-			if len(vendorProviders) > 0 {
-				fmt.Printf("   %sTarget:%s       %s%v%s\n", colorBlue, colorReset, colorGreen, vendorProviders, colorReset)
-			} else {
-				providerNames := make([]string, 0, len(cfg.VendorExtensions.Providers))
-				for name := range cfg.VendorExtensions.Providers {
-					providerNames = append(providerNames, name)
-				}
-				if len(providerNames) > 0 {
-					fmt.Printf("   %sProviders:%s    %s%v%s\n", colorBlue, colorReset, colorGreen, providerNames, colorReset)
-				}
-			}
-		}
-
-		// Mappings
-		if len(cfg.Mappings) > 0 {
-			fmt.Printf("\n🔀 %sKey Mappings:%s\n", colorCyan, colorReset)
-			for k, v := range cfg.Mappings {
-				fmt.Printf("   %s%s%s %s→%s %s%s%s\n", colorYellow, k, colorReset, colorGreen, colorReset, colorBlue, v, colorReset)
-			}
-		}
-
-		fmt.Printf("\n%s🚀 Starting transformation...%s\n", colorGreen, colorReset)
+		// Print config summary
+		printConfigSummary(cfg, vendorProviders)
 
 		// If interactive flag is set, launch TUI for preview/approval BEFORE any transformation
 		if interactive {
@@ -308,7 +238,7 @@ var rootCmd = &cobra.Command{
 					os.Exit(2)
 				}
 
-				printFlattenResults(flattenResult)
+				printFlattenResultsImproved(flattenResult)
 			}
 
 			// Process vendor extensions if configured (for interactive mode)
@@ -333,10 +263,31 @@ var rootCmd = &cobra.Command{
 				printVendorExtensionResults(vendorResult)
 			}
 
+			// Process default values if configured (for interactive mode)
+			if cfg.DefaultValues.Enabled && len(actuallyChanged) > 0 {
+				fmt.Printf("\n⚙️  %sProcessing default values...%s\n", colorCyan, colorReset)
+				defaultsOpts := transform.DefaultsOptions{
+					Options: transform.Options{
+						Mappings: cfg.Mappings,
+						Exclude:  cfg.Exclude,
+						DryRun:   false,
+						Backup:   cfg.Backup,
+					},
+					DefaultValues: cfg.DefaultValues,
+				}
+				defaultsResult, err := transform.ProcessDefaultsInDir(cfg.Input, defaultsOpts)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Default values processing error:", err)
+					os.Exit(2)
+				}
+
+				printDefaultsResults(defaultsResult)
+			}
+
 			// Run validation if requested (for interactive mode)
 			if cfg.Validate {
 				fmt.Printf("\n🔍 %sValidating OpenAPI specifications...%s\n", colorCyan, colorReset)
-				if err := runSwaggerValidate(cfg.Input); err != nil {
+				if err := RunSwaggerValidate(cfg.Input); err != nil {
 					fmt.Fprintf(os.Stderr, "%s❌ Validation failed:%s %v\n", colorRed, colorReset, err)
 					os.Exit(3)
 				}
@@ -408,10 +359,36 @@ var rootCmd = &cobra.Command{
 				}
 				fmt.Println()
 			}
+			if cfg.DefaultValues.Enabled {
+				stepNum := 2
+				if cfg.VendorExtensions.Enabled {
+					stepNum = 3
+				}
+				fmt.Printf("\033[1;36m[STEP %d] Default values changes\033[0m\n", stepNum)
+				dryRunDefaultsOpts := transform.DefaultsOptions{
+					Options: transform.Options{
+						Mappings: cfg.Mappings,
+						Exclude:  cfg.Exclude,
+						DryRun:   true, // Force dry-run for preview
+						Backup:   cfg.Backup,
+					},
+					DefaultValues: cfg.DefaultValues,
+				}
+				defaultsResult, err := transform.ProcessDefaultsInDir(cfg.Input, dryRunDefaultsOpts)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Default values dry-run error:", err)
+				} else {
+					printDefaultsResults(defaultsResult)
+				}
+				fmt.Println()
+			}
 			if cfg.FlattenResponses {
 				stepNum := 2
 				if cfg.VendorExtensions.Enabled {
 					stepNum = 3
+				}
+				if cfg.DefaultValues.Enabled {
+					stepNum = 4
 				}
 				fmt.Printf("\033[1;36m[STEP %d] Response flattening changes\033[0m\n", stepNum)
 				fmt.Printf("\033[1;31m⚠️  CRITICAL: This preview operates on the ORIGINAL file.\033[0m\n")
@@ -430,7 +407,7 @@ var rootCmd = &cobra.Command{
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "Response flattening dry-run error:", err)
 				} else {
-					printFlattenResults(flattenResult)
+					printFlattenResultsImproved(flattenResult)
 				}
 				fmt.Println()
 			}
@@ -438,6 +415,9 @@ var rootCmd = &cobra.Command{
 				stepNum := 3
 				if cfg.VendorExtensions.Enabled {
 					stepNum = 4
+				}
+				if cfg.DefaultValues.Enabled {
+					stepNum++
 				}
 				fmt.Printf("\033[1;36m[STEP %d] Validation\033[0m\n", stepNum)
 				fmt.Printf("\033[1;33m⏭️  Skipping validation in dry-run mode\033[0m\n\n")
@@ -493,7 +473,7 @@ var rootCmd = &cobra.Command{
 				os.Exit(2)
 			}
 
-			printFlattenResults(flattenResult)
+			printFlattenResultsImproved(flattenResult)
 		}
 
 		// Process vendor extensions if configured (skip in dry-run mode)
@@ -513,10 +493,26 @@ var rootCmd = &cobra.Command{
 			printVendorExtensionResults(vendorResult)
 		}
 
+		// Process default values if configured (skip in dry-run mode)
+		if cfg.DefaultValues.Enabled && !dryRun {
+			fmt.Printf("\n⚙️  %sProcessing default values...%s\n", colorCyan, colorReset)
+			defaultsOpts := transform.DefaultsOptions{
+				Options:       opts,
+				DefaultValues: cfg.DefaultValues,
+			}
+			defaultsResult, err := transform.ProcessDefaultsInDir(cfg.Input, defaultsOpts)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Default values processing error:", err)
+				os.Exit(2)
+			}
+
+			printDefaultsResults(defaultsResult)
+		}
+
 		// Run validation if requested
 		if cfg.Validate && !dryRun {
 			fmt.Printf("\n🔍 %sValidating OpenAPI specifications...%s\n", colorCyan, colorReset)
-			if err := runSwaggerValidate(cfg.Input); err != nil {
+			if err := RunSwaggerValidate(cfg.Input); err != nil {
 				fmt.Fprintf(os.Stderr, "%s❌ Validation failed:%s %v\n", colorRed, colorReset, err)
 				os.Exit(3)
 			}
@@ -540,9 +536,13 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&noConfig, "no-config", false, "Ignore all config files and use only CLI flags")
 	rootCmd.PersistentFlags().StringVar(&paginationPriorityStr, "pagination-priority", "", "Pagination strategy priority order (e.g., checkpoint,offset,page,cursor,none)")
 	rootCmd.PersistentFlags().BoolVar(&flattenResponses, "flatten-responses", false, "Flatten oneOf/anyOf/allOf with single $ref after pagination processing")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Show detailed output including skipped targets and operations")
 
 	// Vendor extension flags
 	rootCmd.PersistentFlags().StringArrayVar(&vendorProviders, "vendor-providers", nil, "Specific vendor providers to apply (e.g., fern,speakeasy). If empty, applies all configured providers")
+
+	// Default values flags
+	rootCmd.PersistentFlags().BoolVar(&setDefaults, "set-defaults", false, "Enable default value setting (requires configuration via config file)")
 }
 
 // Execute runs the root command.
@@ -552,260 +552,3 @@ func Execute() {
 		os.Exit(1)
 	}
 }
-
-// runSwaggerValidate shells out to swagger-cli validate for all YAML/JSON files in the input dir
-func runSwaggerValidate(inputDir string) error {
-	files := []string{}
-	err := filepath.WalkDir(inputDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if transform.IsYAML(path) || transform.IsJSON(path) {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	for _, f := range files {
-		cmd := fmt.Sprintf("swagger-cli validate %q", f)
-		fmt.Printf("   %s🔍 Validating:%s %s\n", colorBlue, colorReset, f)
-
-		if code := runShellSilent(cmd); code != 0 {
-			return fmt.Errorf("swagger-cli validate failed for %s", f)
-		}
-		fmt.Printf("   %s✅ %s is valid%s\n", colorGreen, f, colorReset)
-	}
-	return nil
-}
-
-// runShellSilent runs a shell command silently and returns the exit code
-func runShellSilent(cmd string) int {
-	c := os.Getenv("SHELL")
-	if c == "" {
-		c = "/bin/sh"
-	}
-	proc := execCommand(c, "-c", cmd)
-	// Don't pipe stdout/stderr to avoid duplicate output
-	if err := proc.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
-			return exit.ExitCode()
-		}
-		return 1
-	}
-	return 0
-}
-
-// getStatusColor returns green for true, red for false
-func getStatusColor(status bool) string {
-	if status {
-		return colorGreen
-	}
-	return colorRed
-}
-
-// printPaginationResults prints the pagination processing results
-func printPaginationResults(paginationResult *transform.PaginationResult) {
-	if paginationResult.Changed {
-		fmt.Printf("\n🔄 %sPagination Processing Results%s\n", colorBold, colorReset)
-		fmt.Printf("═══════════════════════════════════════\n")
-
-		// Summary stats
-		fmt.Printf("📄 %sProcessed files:%s %s%d%s\n",
-			colorCyan, colorReset, colorGreen, len(paginationResult.ProcessedFiles), colorReset)
-
-		// Removed parameters section
-		if len(paginationResult.RemovedParams) > 0 {
-			fmt.Printf("\n🗑️  %sRemoved Parameters%s\n", colorYellow, colorReset)
-			for endpoint, params := range paginationResult.RemovedParams {
-				fmt.Printf("   %s• %s%s%s\n", colorYellow, colorBold, endpoint, colorReset)
-				for _, param := range params {
-					fmt.Printf("     %s- %s%s\n", colorRed, param, colorReset)
-				}
-			}
-		}
-
-		// Removed responses section
-		if len(paginationResult.RemovedResponses) > 0 {
-			fmt.Printf("\n📋 %sRemoved Response Codes%s\n", colorYellow, colorReset)
-			for endpoint, responses := range paginationResult.RemovedResponses {
-				fmt.Printf("   %s• %s%s%s\n", colorYellow, colorBold, endpoint, colorReset)
-				for _, response := range responses {
-					fmt.Printf("     %s- %s%s\n", colorRed, response, colorReset)
-				}
-			}
-		}
-
-		// Cleanup section
-		if len(paginationResult.UnusedComponents) > 0 {
-			fmt.Printf("\n🧹 %sRemoved Unused Components%s\n", colorPurple, colorReset)
-			for _, component := range paginationResult.UnusedComponents {
-				fmt.Printf("   %s- %s%s\n", colorRed, component, colorReset)
-			}
-		}
-
-		fmt.Printf("\n%s✅ Pagination cleanup completed successfully%s\n", colorGreen, colorReset)
-	} else {
-		fmt.Printf("⏭️  %sNo pagination changes needed%s\n", colorYellow, colorReset)
-	}
-}
-
-func printFlattenResults(flattenResult *transform.FlattenResult) {
-	if flattenResult == nil {
-		fmt.Printf("  %sNo flattening result to display%s\n", colorRed, colorReset)
-		return
-	}
-
-	fmt.Println("🛠️  Processing response flattening...")
-
-	if !flattenResult.Changed {
-		fmt.Printf("  %sNo response flattening changes needed.%s\n", colorYellow, colorReset)
-		return
-	}
-
-	fmt.Printf("%s✅ Response flattening completed%s\n", colorGreen, colorReset)
-	fmt.Printf("  📄 Processed files: %s%d%s\n", colorGreen, len(flattenResult.ProcessedFiles), colorReset)
-
-	for file, refs := range flattenResult.FlattenedRefs {
-		fmt.Printf("\n🔍 Flattened references in: %s%s%s\n", colorBold, file, colorReset)
-
-		var oneOfs, anyOfs, allOfs, remaps []string
-		for _, ref := range refs {
-			switch {
-			case strings.Contains(ref, "oneOf"):
-				oneOfs = append(oneOfs, ref)
-			case strings.Contains(ref, "anyOf"):
-				anyOfs = append(anyOfs, ref)
-			case strings.Contains(ref, "allOf"):
-				allOfs = append(allOfs, ref)
-			default:
-				remaps = append(remaps, ref)
-			}
-		}
-
-		printCategory := func(label string, color string, items []string) {
-			if len(items) == 0 {
-				return
-			}
-			fmt.Printf("  ── %s%s%s:\n", color, label, colorReset)
-			for _, item := range items {
-				parts := strings.SplitN(item, "->", 2)
-				if len(parts) == 2 {
-					fmt.Printf("      - %s%s%s\n        %s→%s %s\n",
-						colorBold, strings.TrimSpace(parts[0]), colorReset,
-						colorGreen, colorReset, strings.TrimSpace(parts[1]),
-					)
-				} else {
-					fmt.Printf("      - %s\n", item)
-				}
-			}
-		}
-
-		printCategory("oneOf replacements", colorYellow, oneOfs)
-		printCategory("anyOf replacements", colorCyan, anyOfs)
-		printCategory("allOf replacements", colorPurple, allOfs)
-		printCategory("$ref remappings", colorBlue, remaps)
-	}
-}
-
-// printVendorExtensionResults prints the vendor extension processing results
-func printVendorExtensionResults(vendorResult *transform.VendorExtensionResult) {
-	if vendorResult.Changed {
-		printVendorExtensionHeader(vendorResult)
-		printAddedExtensions(vendorResult.AddedExtensions)
-		printSkippedOperations(vendorResult.SkippedOperations)
-		fmt.Printf("\n%s✅ Vendor extensions added successfully%s\n", colorGreen, colorReset)
-	} else {
-		fmt.Printf("⏭️  %sNo vendor extension changes needed%s\n", colorYellow, colorReset)
-	}
-}
-
-// printVendorExtensionHeader prints the header and summary stats
-func printVendorExtensionHeader(vendorResult *transform.VendorExtensionResult) {
-	fmt.Printf("\n🏷️  %sVendor Extension Processing Results%s\n", colorBold, colorReset)
-	fmt.Printf("═══════════════════════════════════════════\n")
-	fmt.Printf("📄 %sProcessed files:%s %s%d%s\n",
-		colorCyan, colorReset, colorGreen, len(vendorResult.ProcessedFiles), colorReset)
-}
-
-// printAddedExtensions prints the added extensions section
-func printAddedExtensions(addedExtensions map[string][]string) {
-	if len(addedExtensions) == 0 {
-		return
-	}
-
-	fmt.Printf("\n✅ %sAdded Extensions%s\n", colorGreen, colorReset)
-	for file, extensions := range addedExtensions {
-		fmt.Printf("   %s📁 %s%s%s\n", colorBlue, colorBold, file, colorReset)
-		strategies := groupExtensionsByStrategy(extensions)
-		printGroupedExtensions(strategies)
-	}
-}
-
-// groupExtensionsByStrategy groups extensions by their strategy type
-func groupExtensionsByStrategy(extensions []string) map[string][]string {
-	strategies := make(map[string][]string)
-	for _, ext := range extensions {
-		strategy := extractStrategy(ext)
-		strategies[strategy] = append(strategies[strategy], ext)
-	}
-	return strategies
-}
-
-// extractStrategy extracts the strategy from an extension string
-func extractStrategy(ext string) string {
-	if strings.Contains(ext, "(") && strings.Contains(ext, " strategy)") {
-		start := strings.LastIndex(ext, "(") + 1
-		end := strings.LastIndex(ext, " strategy)")
-		if start > 0 && end > start {
-			return ext[start:end]
-		}
-	}
-	return "other"
-}
-
-// printGroupedExtensions prints extensions grouped by strategy
-func printGroupedExtensions(strategies map[string][]string) {
-	for strategy, exts := range strategies {
-		if strategy != "other" {
-			fmt.Printf("      %s🎯 %s pagination:%s\n", colorPurple, strings.ToUpper(strategy[:1])+strategy[1:], colorReset)
-		}
-		for _, ext := range exts {
-			if strategy == "other" {
-				fmt.Printf("      %s• %s%s\n", colorGreen, ext, colorReset)
-			} else {
-				printStrategyExtension(ext)
-			}
-		}
-	}
-}
-
-// printStrategyExtension prints a single strategy extension
-func printStrategyExtension(ext string) {
-	parts := strings.Split(ext, ":")
-	if len(parts) > 0 {
-		endpoint := strings.TrimSpace(parts[0])
-		fmt.Printf("        %s→ %s%s\n", colorGreen, endpoint, colorReset)
-	}
-}
-
-// printSkippedOperations prints the skipped operations section
-func printSkippedOperations(skippedOperations map[string][]string) {
-	if len(skippedOperations) == 0 {
-		return
-	}
-
-	totalSkipped := 0
-	for _, skipped := range skippedOperations {
-		totalSkipped += len(skipped)
-	}
-	fmt.Printf("\n⏭️  %sSkipped Operations: %s%d%s (use --verbose for details)\n",
-		colorYellow, colorBold, totalSkipped, colorReset)
-}
-
-// execCommand is a wrapper for exec.Command (for testability)
-var execCommand = exec.Command

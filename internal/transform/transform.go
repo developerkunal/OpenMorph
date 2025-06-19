@@ -340,3 +340,49 @@ func shouldExclude(key string, exclude []string) bool {
 func File(path string, opts Options) (bool, error) {
 	return FileWithChanges(path, opts, nil)
 }
+
+// processTransformInDir is a generic helper to apply a transform across all OpenAPI files in a directory.
+func processTransformInDir[T any](
+	dir string,
+	enabled bool,
+	isConfigEmpty bool,
+	initResult func() T,
+	processFileWithResult func(path string, result T) (bool, error),
+	setProcessedFiles func(T, []string),
+	setChanged func(T, bool),
+) (T, error) {
+	result := initResult()
+
+	if !enabled || isConfigEmpty {
+		return result, nil
+	}
+
+	var processedFiles []string
+	var hasChanges bool
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		if IsYAML(path) || IsJSON(path) {
+			changed, err := processFileWithResult(path, result)
+			if err != nil {
+				return fmt.Errorf("error processing %s: %w", path, err)
+			}
+			if changed {
+				hasChanges = true
+				processedFiles = append(processedFiles, path)
+			}
+		}
+		return nil
+	})
+
+	setProcessedFiles(result, processedFiles)
+	setChanged(result, hasChanges)
+
+	return result, err
+}

@@ -19,6 +19,7 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 ## Features
 
 - Transform OpenAPI vendor extension keys in YAML/JSON
+- **Default values injection** - Automatically set default values for parameters, schemas, and responses with rule-based matching
 - **Vendor-specific pagination extensions** - Auto-inject Fern, Speakeasy, and other vendor pagination metadata
 - **Auto-detection of array fields** - Automatically find results arrays in response schemas
 - Interactive TUI for reviewing and approving changes
@@ -211,7 +212,7 @@ openmorph --input ./openapi --vendor-providers fern --config config.yaml
 
 ### Example: Complete Transformation
 
-Transform keys, clean up pagination, and add vendor extensions:
+Transform keys, clean up pagination, add vendor extensions, and set default values:
 
 ```sh
 openmorph --input ./openapi \
@@ -221,6 +222,22 @@ openmorph --input ./openapi \
   --flatten-responses \
   --backup \
   --config ./config.yaml
+```
+
+Your `config.yaml` can include all features:
+
+```yaml
+mappings:
+  x-foo: x-bar
+vendor_extensions:
+  enabled: true
+  providers:
+    fern:
+      # ... fern config
+default_values:
+  enabled: true
+  rules:
+    # ... default value rules
 ```
 
 ### Example: Pagination Priority
@@ -484,6 +501,202 @@ openmorph --input ./openapi --dry-run --config config.yaml
       page_size_param: "$request.size"
       results_path: "$response.data"
 ```
+
+## Default Values
+
+OpenMorph includes a powerful default values feature that allows you to automatically set default values throughout your OpenAPI specifications. This feature supports complex rule-based matching and can be applied to parameters, request bodies, response schemas, and component schemas.
+
+### Overview
+
+The Default Values feature allows you to:
+
+- Set defaults for **parameter schemas** (path, query, header, cookie)
+- Set defaults for **request body schemas**
+- Set defaults for **response schemas**
+- Set defaults for **component schemas** (reusable objects)
+- Apply defaults to **arrays** and **enum fields**
+- Use **regex patterns** for flexible property matching
+- Configure **rule priorities** for precise control
+
+### Configuration
+
+Default values are configured through the `default_values` section in your config file:
+
+```yaml
+default_values:
+  enabled: true
+  rules:
+    # Set default limit for pagination parameters
+    query_limit_defaults:
+      target:
+        location: "parameter"
+      condition:
+        parameter_in: "query"
+        type: "integer"
+        property_name: "(limit|size|page_size|per_page)"
+      value: 20
+      priority: 10
+
+    # Set default sort direction
+    query_sort_defaults:
+      target:
+        location: "parameter"
+      condition:
+        parameter_in: "query"
+        type: "string"
+        property_name: "(sort|order|direction)"
+      value: "asc"
+      priority: 9
+
+    # Boolean fields default to true
+    boolean_defaults:
+      target:
+        location: "component"
+      condition:
+        type: "boolean"
+        property_name: "(active|enabled|is_.*)"
+      value: true
+      priority: 8
+```
+
+### Configuration Options
+
+#### Target
+
+- `location`: Where to apply defaults
+  - `"parameter"` - URL parameters (query, path, header, cookie)
+  - `"request_body"` - Request body schemas
+  - `"response"` - Response body schemas
+  - `"component"` - Component schemas (reusable objects)
+- `property`: Optional specific property name to target
+- `path`: Optional JSONPath-like selector for precise targeting
+
+#### Conditions
+
+- `type`: Schema type constraint (`"string"`, `"integer"`, `"boolean"`, `"array"`, `"object"`)
+- `parameter_in`: For parameters - where they're located (`"query"`, `"path"`, `"header"`, `"cookie"`)
+- `http_methods`: List of HTTP methods to target (`["get", "post"]`)
+- `path_patterns`: List of regex patterns for API paths (`["/api/v1/.*"]`)
+- `has_enum`: Only apply to fields with enum constraints
+- `is_array`: Only apply to array-type fields
+- `property_name`: Regex pattern to match property names (`"(limit|size|page_size)"`)
+- `required`: Apply only to required (`true`) or optional (`false`) fields
+
+#### Values
+
+- `value`: Simple default value (string, number, boolean, array, object)
+- `template`: Complex template object for structured defaults
+- `priority`: Rule priority (higher numbers = higher priority)
+
+### Usage Examples
+
+**Apply defaults using config file:**
+
+```bash
+openmorph --input ./openapi --config config.yaml
+```
+
+**Preview defaults changes:**
+
+```bash
+openmorph --input ./openapi --config config.yaml --dry-run
+```
+
+**Combine with other transformations:**
+
+```bash
+openmorph --input ./openapi \
+  --mapping x-operation-group-name=x-fern-sdk-group-name \
+  --vendor-providers fern \
+  --pagination-priority cursor,offset,none \
+  --flatten-responses \
+  --config config.yaml
+```
+
+### Advanced Examples
+
+**Complex object defaults:**
+
+```yaml
+default_values:
+  enabled: true
+  rules:
+    settings_defaults:
+      target:
+        location: "component"
+      condition:
+        type: "object"
+        property_name: "settings"
+      template:
+        theme: "light"
+        notifications: true
+        language: "en"
+      priority: 4
+```
+
+**Array response defaults:**
+
+```yaml
+default_values:
+  enabled: true
+  rules:
+    array_defaults:
+      target:
+        location: "response"
+      condition:
+        type: "array"
+        http_methods: ["get"]
+        path_patterns: ["/api/v1/.*"]
+      value: []
+      priority: 5
+```
+
+### Rule Priority and Ordering
+
+Rules are processed in priority order (highest priority first), allowing you to:
+
+1. Set broad defaults with low priority
+2. Override with specific defaults using higher priority
+3. Ensure consistent application order across runs
+
+```yaml
+default_values:
+  enabled: true
+  rules:
+    # Broad rule - low priority
+    all_strings:
+      condition:
+        type: "string"
+      value: "default"
+      priority: 1
+
+    # Specific rule - high priority (overrides above)
+    user_names:
+      condition:
+        type: "string"
+        property_name: "name"
+      value: "Anonymous"
+      priority: 10
+```
+
+### Best Practices
+
+1. **Use Regex Patterns**: Property name matching supports regex for flexible targeting
+2. **Prioritize Rules**: Use priority to control application order
+3. **Test with Dry-Run**: Always preview changes before applying
+4. **Backup Files**: Enable backup for safe operations
+5. **Combine Features**: Use alongside vendor extensions and other transformations
+6. **Document Rules**: Use clear rule names and comments in config files
+
+### Integration
+
+The defaults feature integrates seamlessly with other OpenMorph features:
+
+- **Vendor Extensions**: Applied before vendor extensions
+- **Response Flattening**: Works on original schemas before flattening
+- **Validation**: Validates resulting OpenAPI specs
+- **Interactive Mode**: Preview all changes together
+- **Backup**: Automatic backup before modifications
 
 ## Interactive TUI Controls
 

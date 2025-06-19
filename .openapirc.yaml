@@ -68,3 +68,78 @@ vendor_extensions:
             page_size_param: "$request.{limit_param}"
             results_path: "$response.{results_field}"
           required_fields: ["cursor_param", "results_field"]
+
+# Default values configuration
+default_values:
+  enabled: true
+  rules:
+    # Set default values for query parameters
+    query_limit_defaults:
+      target:
+        location: "parameter"
+      condition:
+        parameter_in: "query"
+        type: "integer"
+        property_name: "(limit|size|page_size|per_page)"
+      value: 20
+      priority: 10
+
+    query_sort_defaults:
+      target:
+        location: "parameter"
+      condition:
+        parameter_in: "query"
+        type: "string"
+        property_name: "(sort|order|direction)"
+      value: "asc"
+      priority: 9
+
+    # Set defaults for boolean properties in components
+    boolean_defaults:
+      target:
+        location: "component"
+      condition:
+        type: "boolean"
+        property_name: "(active|enabled|is_.*)"
+      value: true
+      priority: 8
+
+    # Set defaults for role/status fields
+    role_defaults:
+      target:
+        location: "component"
+      condition:
+        type: "string"
+        property_name: "role"
+      value: "user"
+      priority: 7
+
+    status_defaults:
+      target:
+        location: "component"
+      condition:
+        type: "string"
+        property_name: "status"
+      value: "active"
+      priority: 6
+
+    # Set defaults for array fields in response schemas
+    array_defaults:
+      target:
+        location: "response"
+      condition:
+        type: "array"
+        http_methods: ["get"]
+      value: []
+      priority: 5
+
+    # Set defaults for enum fields
+    priority_enum_defaults:
+      target:
+        location: "component"
+      condition:
+        type: "string"
+        property_name: "priority"
+        has_enum: true
+      value: "medium"
+      priority: 4

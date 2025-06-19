@@ -16,6 +16,7 @@ type Config struct {
 	PaginationPriority []string          `yaml:"pagination_priority" json:"pagination_priority"`
 	FlattenResponses   bool              `yaml:"flatten_responses" json:"flatten_responses"`
 	VendorExtensions   VendorExtensions  `yaml:"vendor_extensions" json:"vendor_extensions"`
+	DefaultValues      DefaultValues     `yaml:"default_values" json:"default_values"`
 }
 
 // VendorExtensions configuration for adding vendor-specific extensions
@@ -45,6 +46,40 @@ type StrategyConfig struct {
 	Template       map[string]interface{} `yaml:"template" json:"template"`
 	RequiredFields []string               `yaml:"required_fields" json:"required_fields"`
 	OptionalFields []string               `yaml:"optional_fields" json:"optional_fields"`
+}
+
+// DefaultValues configuration for setting defaults in OpenAPI specs
+type DefaultValues struct {
+	Enabled bool                   `yaml:"enabled" json:"enabled"`
+	Rules   map[string]DefaultRule `yaml:"rules" json:"rules"`
+}
+
+// DefaultRule defines a rule for setting default values
+type DefaultRule struct {
+	Target    DefaultTarget          `yaml:"target" json:"target"`
+	Condition DefaultCondition       `yaml:"condition" json:"condition"`
+	Value     interface{}            `yaml:"value" json:"value"`
+	Template  map[string]interface{} `yaml:"template" json:"template"`
+	Priority  int                    `yaml:"priority" json:"priority"`
+}
+
+// DefaultTarget specifies where the default should be applied
+type DefaultTarget struct {
+	Location string `yaml:"location" json:"location"` // "parameter", "request_body", "response", "component", "array", "enum"
+	Property string `yaml:"property" json:"property"` // specific property name (optional)
+	Path     string `yaml:"path" json:"path"`         // JSONPath-like selector (optional)
+}
+
+// DefaultCondition specifies when the default should be applied
+type DefaultCondition struct {
+	Type         string   `yaml:"type" json:"type"`                   // type constraint (e.g., "string", "integer", "boolean")
+	ParameterIn  string   `yaml:"parameter_in" json:"parameter_in"`   // for parameters: "query", "path", "header", "cookie"
+	HTTPMethods  []string `yaml:"http_methods" json:"http_methods"`   // which HTTP methods to target
+	PathPatterns []string `yaml:"path_patterns" json:"path_patterns"` // which API paths to target
+	HasEnum      bool     `yaml:"has_enum" json:"has_enum"`           // only apply if field has enum values
+	IsArray      bool     `yaml:"is_array" json:"is_array"`           // only apply if field is array
+	PropertyName string   `yaml:"property_name" json:"property_name"` // match specific property names
+	Required     *bool    `yaml:"required" json:"required"`           // apply only to required/optional fields
 }
 
 // LoadConfig loads config from file (YAML/JSON) and merges with inline flags. If noConfig is true, ignores all config files and uses only CLI flags.

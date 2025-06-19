@@ -2,7 +2,6 @@ package transform
 
 import (
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -29,44 +28,38 @@ type VendorExtensionResult struct {
 	SkippedOperations map[string][]string // file -> list of skipped operations with reasons
 }
 
-// ProcessVendorExtensionsInDir processes vendor extensions in all OpenAPI files in a directory
-func ProcessVendorExtensionsInDir(dir string, opts VendorExtensionOptions) (*VendorExtensionResult, error) {
-	result := &VendorExtensionResult{
+// createVendorExtensionResult creates a new VendorExtensionResult with initialized maps
+func createVendorExtensionResult() *VendorExtensionResult {
+	return &VendorExtensionResult{
 		ProcessedFiles:    []string{},
 		AddedExtensions:   make(map[string][]string),
 		SkippedOperations: make(map[string][]string),
 	}
+}
 
-	if !opts.VendorExtensions.Enabled {
-		return result, nil // Feature not enabled
-	}
+// setVendorExtensionProcessedFiles sets the processed files for a VendorExtensionResult
+func setVendorExtensionProcessedFiles(result *VendorExtensionResult, files []string) {
+	result.ProcessedFiles = files
+}
 
-	if len(opts.VendorExtensions.Providers) == 0 {
-		return result, nil // No providers configured
-	}
+// setVendorExtensionChanged sets the changed flag for a VendorExtensionResult
+func setVendorExtensionChanged(result *VendorExtensionResult, changed bool) {
+	result.Changed = changed
+}
 
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		if IsYAML(path) || IsJSON(path) {
-			changed, err := processVendorExtensionsInFile(path, opts, result)
-			if err != nil {
-				return fmt.Errorf("error processing %s: %w", path, err)
-			}
-			if changed {
-				result.Changed = true
-				result.ProcessedFiles = append(result.ProcessedFiles, path)
-			}
-		}
-		return nil
-	})
-
-	return result, err
+// ProcessVendorExtensionsInDir processes vendor extensions in all OpenAPI files in a directory
+func ProcessVendorExtensionsInDir(dir string, opts VendorExtensionOptions) (*VendorExtensionResult, error) {
+	return processTransformInDir(
+		dir,
+		opts.VendorExtensions.Enabled,
+		len(opts.VendorExtensions.Providers) == 0,
+		createVendorExtensionResult,
+		func(path string, result *VendorExtensionResult) (bool, error) {
+			return processVendorExtensionsInFile(path, opts, result)
+		},
+		setVendorExtensionProcessedFiles,
+		setVendorExtensionChanged,
+	)
 }
 
 // processVendorExtensionsInFile processes vendor extensions in a single file
@@ -361,19 +354,19 @@ func createYAMLNodeFromMap(data map[string]interface{}) *yaml.Node {
 	sort.Slice(keys, func(i, j int) bool {
 		orderI := getPaginationFieldOrder(keys[i])
 		orderJ := getPaginationFieldOrder(keys[j])
-		
+
 		// If orders are the same, sort alphabetically
 		if orderI == orderJ {
 			return keys[i] < keys[j]
 		}
-		
+
 		return orderI < orderJ
 	})
 
 	// Add keys and values in sorted order
 	for _, key := range keys {
 		value := data[key]
-		
+
 		keyNode := &yaml.Node{
 			Kind:  yaml.ScalarNode,
 			Value: key,
@@ -403,7 +396,7 @@ func getPaginationFieldOrder(key string) int {
 	switch key {
 	case "offset":
 		return 1
-	case "cursor": 
+	case "cursor":
 		return 1 // Same priority as offset - they're mutually exclusive
 	case "page":
 		return 1 // Same priority as offset/cursor - they're mutually exclusive
