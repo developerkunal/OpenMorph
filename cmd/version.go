@@ -5,15 +5,15 @@ import (
 	"strings"
 )
 
-// Version is set by GoReleaser at build time. Do not update manually.
-var Version = "dev"
+// version is set by GoReleaser at build time. Do not update manually.
+var version = "dev"
 
 // GetVersion returns the current version, preferring build-time version,
 // then falling back to .version file, then "dev"
 func GetVersion() string {
 	// If version was set at build time (not "dev"), use it
-	if Version != "dev" {
-		return Version
+	if version != "dev" {
+		return version
 	}
 
 	// Try to read from .version file
