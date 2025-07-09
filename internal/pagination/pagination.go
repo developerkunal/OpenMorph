@@ -10,11 +10,13 @@ import (
 
 // Strategy defines a pagination strategy with its parameters and response fields
 type Strategy struct {
-	Params []string
-	Fields []string
+	Params []string // Query parameters used by this pagination strategy
+	Fields []string // Response fields used by this pagination strategy
 }
 
 // PaginationStrategies defines all supported pagination strategies
+// Each strategy has specific parameters that trigger its detection
+// and response fields that indicate its presence in API responses
 var PaginationStrategies = map[string]Strategy{
 	"checkpoint": {
 		Params: []string{"from", "take", "after"},
@@ -40,7 +42,16 @@ var PaginationStrategies = map[string]Strategy{
 
 // Options represents pagination transformation options
 type Options struct {
-	Priority []string // ordered list of pagination strategies by priority
+	Priority      []string                 // Global ordered list of pagination strategies by priority
+	EndpointRules []EndpointPaginationRule // Endpoint-specific pagination rules that override global priority
+}
+
+// EndpointPaginationRule defines pagination configuration for specific endpoints
+// Supports exact endpoint matching and wildcard patterns (e.g., /api/v1/users/*)
+type EndpointPaginationRule struct {
+	Endpoint   string // Endpoint pattern (supports wildcards like /api/v1/users/*)
+	Method     string // HTTP method (GET, POST, etc.) - case insensitive
+	Pagination string // Pagination strategy (cursor, checkpoint, offset, page, none)
 }
 
 // DetectedPagination represents detected pagination in an endpoint
@@ -245,6 +256,28 @@ func ProcessEndpoint(operation *yaml.Node, opts Options) (*ProcessResult, error)
 
 // ProcessEndpointWithDoc processes a single endpoint with document context for $ref resolution
 func ProcessEndpointWithDoc(operation *yaml.Node, doc *yaml.Node, opts Options) (*ProcessResult, error) {
+	return ProcessEndpointWithPathAndMethod(operation, doc, "", "", opts)
+}
+
+// ProcessEndpointWithPathAndMethod processes a single endpoint with path and method for endpoint-specific rules
+//
+// This is the main entry point for endpoint-specific pagination processing. It:
+// 1. Detects all pagination strategies present in the endpoint (params + responses)
+// 2. Resolves the correct pagination strategy using endpoint-specific rules or global priority
+// 3. Selects the best available strategy based on the resolved priority
+// 4. Removes parameters and response fields that don't belong to the selected strategy
+//
+// Parameters:
+// - operation: YAML node containing the OpenAPI operation (parameters, responses, etc.)
+// - doc: Complete OpenAPI document for $ref resolution (can be nil)
+// - endpoint: The endpoint path (e.g., "/api/v1/users")
+// - method: HTTP method (e.g., "GET", "POST") - case insensitive
+// - opts: Options containing global priority and endpoint-specific rules
+//
+// Returns:
+// - ProcessResult with details of what was changed/removed
+// - Error if processing failed
+func ProcessEndpointWithPathAndMethod(operation *yaml.Node, doc *yaml.Node, endpoint, method string, opts Options) (*ProcessResult, error) {
 	result := &ProcessResult{}
 
 	if operation == nil || operation.Kind != yaml.MappingNode {
@@ -254,20 +287,34 @@ func ProcessEndpointWithDoc(operation *yaml.Node, doc *yaml.Node, opts Options) 
 	params := getNodeValue(operation, "parameters")
 	responses := getNodeValue(operation, "responses")
 
+	// Detect all pagination strategies present in this endpoint
 	strategies := detectPaginationStrategies(params, responses, doc)
 	if len(strategies.paramStrategies) == 0 {
-		return result, nil
+		return result, nil // No pagination detected, nothing to do
 	}
 
+	// Check if this endpoint actually needs processing
 	if !needsProcessingCheck(strategies, params, responses, doc) {
 		return result, nil
 	}
 
-	selectedStrategy := selectBestStrategy(strategies, opts)
-	if selectedStrategy == "" {
-		return result, nil
+	// Get the pagination strategy for this specific endpoint
+	// This will use endpoint-specific rules if they match, otherwise global priority
+	paginationPriority := opts.GetPaginationStrategy(endpoint, method)
+
+	// Create a modified options with the resolved priority
+	resolvedOpts := Options{
+		Priority:      paginationPriority,
+		EndpointRules: opts.EndpointRules, // Keep for any nested processing
 	}
 
+	// Select the best available strategy based on the resolved priority
+	selectedStrategy := selectBestStrategy(strategies, resolvedOpts)
+	if selectedStrategy == "" {
+		return result, nil // No suitable strategy found
+	}
+
+	// Remove unwanted parameters and response fields
 	return processEndpointCleanup(params, responses, selectedStrategy, strategies.allPagination, doc, result)
 }
 
@@ -1472,5 +1519,203 @@ func isPaginationRelevantResponse(code string) bool {
 	if matched, _ := regexp.MatchString(`^4\d\d$`, code); matched {
 		return true
 	}
+	return false
+}
+
+// GetPaginationStrategy returns the pagination strategy for a specific endpoint and method
+// It first checks for endpoint-specific rules, then falls back to global priority
+//
+// Algorithm:
+// 1. Iterate through EndpointRules in order of definition
+// 2. For each rule, check if endpoint matches pattern and method matches (case-insensitive)
+// 3. Return the specific pagination strategy as a single-item priority list if match found
+// 4. If no endpoint rules match, return the global Priority list as fallback
+//
+// Pattern Matching:
+// - Exact match: "/api/users" matches only "/api/users"
+// - Wildcard: "/api/users/*" matches "/api/users", "/api/users/123", "/api/users/123/posts", etc.
+// - Base path: "/api/users/*" also matches "/api/users" (without trailing slash)
+func (opts Options) GetPaginationStrategy(endpoint, method string) []string {
+	// First check for endpoint-specific rules
+	for _, rule := range opts.EndpointRules {
+		if matchesEndpointPattern(endpoint, rule.Endpoint) &&
+			matchesMethodPattern(method, rule.Method) {
+			// Return the specific pagination strategy as a single-item priority list
+			return []string{rule.Pagination}
+		}
+	}
+
+	// Fall back to global pagination priority
+	return opts.Priority
+}
+
+// matchesMethodPattern checks if a method matches a pattern (supports wildcards)
+// Supports exact matching (case-insensitive) and wildcard "*" for any method
+func matchesMethodPattern(method, pattern string) bool {
+	// Wildcard matches any method
+	if pattern == "*" {
+		return true
+	}
+
+	// Case-insensitive exact match
+	return strings.EqualFold(method, pattern)
+}
+
+// matchesEndpointPattern checks if an endpoint matches a pattern (supports wildcards)
+//
+// Supported patterns:
+// - Exact match: endpoint == pattern
+// - Suffix wildcard: pattern ends with "*" (e.g., "/api/users/*")
+// - Middle wildcard: pattern contains "*" in the middle (e.g., "/api/*/analytics")
+// - Base path matching: "/api/users/*" matches both "/api/users" and "/api/users/123"
+//
+// Examples:
+// - matchesEndpointPattern("/api/users", "/api/users") → true
+// - matchesEndpointPattern("/api/users/123", "/api/users/*") → true
+// - matchesEndpointPattern("/api/users", "/api/users/*") → true
+// - matchesEndpointPattern("/api/v2/analytics", "/api/*/analytics") → true
+// - matchesEndpointPattern("/api/posts", "/api/users/*") → false
+func matchesEndpointPattern(endpoint, pattern string) bool {
+	// Handle exact match
+	if endpoint == pattern {
+		return true
+	}
+
+	// Handle patterns with wildcards
+	if strings.Contains(pattern, "*") {
+		return matchesWildcardPattern(endpoint, pattern)
+	}
+
+	return false
+}
+
+// matchesWildcardPattern handles pattern matching with wildcards
+func matchesWildcardPattern(endpoint, pattern string) bool {
+	// Handle simple cases first
+	if pattern == "*" {
+		return true // Single "*" matches everything
+	}
+
+	// Special case for suffix wildcard patterns like "/api/users/*"
+	// This should only apply when there's no other wildcards in the pattern
+	if strings.HasSuffix(pattern, "*") && strings.Count(pattern, "*") == 1 {
+		// This is a simple suffix wildcard, not a complex pattern
+		prefix := strings.TrimSuffix(pattern, "*")
+
+		// If the prefix ends with "/", also match without the trailing "/"
+		if strings.HasSuffix(prefix, "/") {
+			basePrefix := strings.TrimSuffix(prefix, "/")
+			return endpoint == basePrefix || strings.HasPrefix(endpoint, prefix)
+		}
+
+		return strings.HasPrefix(endpoint, prefix)
+	}
+
+	// For all other cases (including "/*", "/*/...", "...*...", etc.), use complex matching
+	return matchesComplexPattern(endpoint, pattern)
+}
+
+// matchesComplexPattern handles patterns with wildcards in various positions
+func matchesComplexPattern(endpoint, pattern string) bool {
+	// Split both into segments for comparison
+	endpointParts := strings.Split(strings.Trim(endpoint, "/"), "/")
+	patternParts := strings.Split(strings.Trim(pattern, "/"), "/")
+
+	// Handle empty endpoint
+	if endpoint == "/" || endpoint == "" {
+		endpointParts = []string{}
+	}
+
+	// Handle empty pattern
+	if pattern == "/" || pattern == "" {
+		patternParts = []string{}
+	}
+
+	return matchSegments(endpointParts, patternParts)
+}
+
+// matchSegments performs segment-by-segment matching with wildcard support
+func matchSegments(endpointParts, patternParts []string) bool {
+	// Check if this is a true suffix wildcard pattern (e.g., "/api/users/*")
+	// vs. a structured pattern with wildcards (e.g., "/*/*/*")
+	isSuffixWildcard := len(patternParts) > 0 &&
+		patternParts[len(patternParts)-1] == "*" &&
+		len(patternParts) > 1 && // More than just "*"
+		// Check if all preceding parts are literal (no wildcards)
+		func() bool {
+			for i := 0; i < len(patternParts)-1; i++ {
+				if patternParts[i] == "*" || strings.Contains(patternParts[i], "*") {
+					return false
+				}
+			}
+			return true
+		}()
+
+	if isSuffixWildcard {
+		// Remove the trailing "*" and check if the prefix matches
+		prefixPatternParts := patternParts[:len(patternParts)-1]
+
+		// Endpoint must have at least as many segments as the prefix pattern
+		if len(endpointParts) < len(prefixPatternParts) {
+			return false
+		}
+
+		// Check if the prefix matches
+		for i, patternPart := range prefixPatternParts {
+			if !matchesSegment(endpointParts[i], patternPart) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// For patterns with structured wildcards (like /*/*/*), segment count must match exactly
+	if len(endpointParts) != len(patternParts) {
+		return false
+	}
+
+	// Check each segment
+	for i, patternPart := range patternParts {
+		if !matchesSegment(endpointParts[i], patternPart) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// matchesSegment checks if an endpoint segment matches a pattern segment
+// Supports "*" (full wildcard) and patterns like "v*" (partial wildcard)
+func matchesSegment(endpointSegment, patternSegment string) bool {
+	// Full wildcard
+	if patternSegment == "*" {
+		return true
+	}
+
+	// Exact match
+	if endpointSegment == patternSegment {
+		return true
+	}
+
+	// Partial wildcard support (e.g., "v*" matches "v1", "v2", etc.)
+	if strings.Contains(patternSegment, "*") {
+		// Simple prefix/suffix wildcard matching
+		if strings.HasSuffix(patternSegment, "*") {
+			prefix := strings.TrimSuffix(patternSegment, "*")
+			return strings.HasPrefix(endpointSegment, prefix)
+		}
+		if strings.HasPrefix(patternSegment, "*") {
+			suffix := strings.TrimPrefix(patternSegment, "*")
+			return strings.HasSuffix(endpointSegment, suffix)
+		}
+
+		// For more complex patterns within segments, could add regex support here
+		// For now, just do simple contains check
+		parts := strings.Split(patternSegment, "*")
+		if len(parts) == 2 {
+			return strings.HasPrefix(endpointSegment, parts[0]) && strings.HasSuffix(endpointSegment, parts[1])
+		}
+	}
+
 	return false
 }

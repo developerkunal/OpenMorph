@@ -210,6 +210,7 @@ var rootCmd = &cobra.Command{
 						Backup:   cfg.Backup,
 					},
 					PaginationPriority: cfg.PaginationPriority,
+					EndpointRules:      cfg.EndpointPagination,
 				}
 				paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, paginationOpts)
 				if err != nil {
@@ -330,6 +331,7 @@ var rootCmd = &cobra.Command{
 						Backup:   cfg.Backup,
 					},
 					PaginationPriority: cfg.PaginationPriority,
+					EndpointRules:      cfg.EndpointPagination,
 				}
 				paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, dryRunPaginationOpts)
 				if err != nil {
@@ -450,6 +452,7 @@ var rootCmd = &cobra.Command{
 			paginationOpts := transform.PaginationOptions{
 				Options:            opts,
 				PaginationPriority: cfg.PaginationPriority,
+				EndpointRules:      cfg.EndpointPagination,
 			}
 			paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, paginationOpts)
 			if err != nil {

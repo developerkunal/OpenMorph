@@ -7,16 +7,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config represents the complete OpenMorph configuration
 type Config struct {
-	Input              string            `yaml:"input" json:"input"`
-	Backup             bool              `yaml:"backup" json:"backup"`
-	Validate           bool              `yaml:"validate" json:"validate"`
-	Exclude            []string          `yaml:"exclude" json:"exclude"`
-	Mappings           map[string]string `yaml:"mappings" json:"mappings"`
-	PaginationPriority []string          `yaml:"pagination_priority" json:"pagination_priority"`
-	FlattenResponses   bool              `yaml:"flatten_responses" json:"flatten_responses"`
-	VendorExtensions   VendorExtensions  `yaml:"vendor_extensions" json:"vendor_extensions"`
-	DefaultValues      DefaultValues     `yaml:"default_values" json:"default_values"`
+	Input              string                   `yaml:"input" json:"input"`
+	Backup             bool                     `yaml:"backup" json:"backup"`
+	Validate           bool                     `yaml:"validate" json:"validate"`
+	Exclude            []string                 `yaml:"exclude" json:"exclude"`
+	Mappings           map[string]string        `yaml:"mappings" json:"mappings"`
+	PaginationPriority []string                 `yaml:"pagination_priority" json:"pagination_priority"` // Global pagination strategy priority
+	EndpointPagination []EndpointPaginationRule `yaml:"endpoint_pagination" json:"endpoint_pagination"` // Endpoint-specific pagination overrides
+	FlattenResponses   bool                     `yaml:"flatten_responses" json:"flatten_responses"`
+	VendorExtensions   VendorExtensions         `yaml:"vendor_extensions" json:"vendor_extensions"`
+	DefaultValues      DefaultValues            `yaml:"default_values" json:"default_values"`
+}
+
+// EndpointPaginationRule defines pagination configuration for specific endpoints
+// Allows overriding global pagination priority for individual endpoints
+//
+// Example:
+//
+//	endpoint: "/api/v1/users/*"  # Supports wildcard patterns
+//	method: "GET"                # HTTP method (case-insensitive)
+//	pagination: "cursor"         # Strategy: cursor, offset, page, checkpoint, none
+type EndpointPaginationRule struct {
+	Endpoint   string `yaml:"endpoint" json:"endpoint"`     // Endpoint pattern (supports wildcards like /api/v1/users/*)
+	Method     string `yaml:"method" json:"method"`         // HTTP method (GET, POST, etc.) - case insensitive
+	Pagination string `yaml:"pagination" json:"pagination"` // Pagination strategy (cursor, checkpoint, offset, page, none)
 }
 
 // VendorExtensions configuration for adding vendor-specific extensions

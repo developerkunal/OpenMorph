@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/developerkunal/OpenMorph/internal/config"
 	"github.com/developerkunal/OpenMorph/internal/pagination"
 )
 
@@ -17,6 +18,20 @@ import (
 type PaginationOptions struct {
 	Options
 	PaginationPriority []string
+	EndpointRules      []config.EndpointPaginationRule
+}
+
+// convertEndpointRules converts config.EndpointPaginationRule to pagination.EndpointPaginationRule
+func convertEndpointRules(configRules []config.EndpointPaginationRule) []pagination.EndpointPaginationRule {
+	var paginationRules []pagination.EndpointPaginationRule
+	for _, rule := range configRules {
+		paginationRules = append(paginationRules, pagination.EndpointPaginationRule{
+			Endpoint:   rule.Endpoint,
+			Method:     rule.Method,
+			Pagination: rule.Pagination,
+		})
+	}
+	return paginationRules
 }
 
 // PaginationResult represents the result of pagination processing
@@ -196,7 +211,10 @@ func processPaginationInPaths(root *yaml.Node, opts PaginationOptions, _ string,
 	}
 
 	changed := false
-	paginationOpts := pagination.Options{Priority: opts.PaginationPriority}
+	paginationOpts := pagination.Options{
+		Priority:      opts.PaginationPriority,
+		EndpointRules: convertEndpointRules(opts.EndpointRules),
+	}
 
 	return processPathsAndOperations(paths, paginationOpts, root, result, &changed)
 }
@@ -233,7 +251,7 @@ func processOperationsInPath(pathNode *yaml.Node, pathName string, paginationOpt
 
 // processOperation processes a single operation
 func processOperation(operation string, operationNode *yaml.Node, pathName string, paginationOpts pagination.Options, root *yaml.Node, result *PaginationResult, changed *bool) {
-	operationResult, err := pagination.ProcessEndpointWithDoc(operationNode, root, paginationOpts)
+	operationResult, err := pagination.ProcessEndpointWithPathAndMethod(operationNode, root, pathName, operation, paginationOpts)
 	if err != nil {
 		fmt.Printf("Warning: failed to process %s %s: %v\n", operation, pathName, err)
 		return

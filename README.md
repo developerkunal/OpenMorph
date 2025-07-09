@@ -258,19 +258,108 @@ openmorph --input ./openapi \
   --dry-run
 ```
 
+Use endpoint-specific pagination rules via configuration file:
+
+```sh
+openmorph --input ./openapi --config my-config.yaml
+```
+
+Where `my-config.yaml` contains:
+
+```yaml
+pagination_priority: ["checkpoint", "offset", "page"]
+endpoint_pagination:
+  - endpoint: "/api/v1/users"
+    method: "GET"
+    pagination: "cursor"
+  - endpoint: "/api/v1/analytics/*"
+    method: "POST"
+    pagination: "offset"
+```
+
 ## Pagination Priority
 
-The pagination priority feature allows you to enforce a single pagination strategy across your OpenAPI specifications by removing lower-priority pagination parameters and responses.
+The pagination priority feature allows you to enforce pagination strategies across your OpenAPI specifications by removing lower-priority pagination parameters and responses. It supports both global priority rules and endpoint-specific overrides.
 
 ### How It Works
 
 When pagination priority is configured, OpenMorph:
 
 1. **Detects** all pagination strategies in each endpoint (parameters and responses)
-2. **Selects** the highest priority strategy from those available
+2. **Selects** the highest priority strategy from those available (endpoint-specific rules take precedence)
 3. **Removes** parameters and response schemas belonging to lower-priority strategies
 4. **Preserves** OpenAPI structure integrity (handles `oneOf`, `anyOf`, `allOf`)
 5. **Cleans up** unused component schemas
+
+### Configuration Options
+
+#### Global Pagination Priority
+
+Set a global priority order that applies to all endpoints:
+
+```yaml
+pagination_priority: ["checkpoint", "offset", "page", "cursor", "none"]
+```
+
+#### Endpoint-Specific Pagination Rules
+
+Override global priority for specific endpoints:
+
+```yaml
+pagination_priority: ["checkpoint", "offset", "page"] # Global fallback
+endpoint_pagination:
+  - endpoint: "/api/v1/users"
+    method: "GET"
+    pagination: "cursor"
+  - endpoint: "/api/v1/posts/*" # Supports wildcards
+    method: "POST"
+    pagination: "checkpoint"
+  - endpoint: "/api/v1/analytics"
+    method: "GET"
+    pagination: "offset"
+```
+
+**Endpoint Pattern Matching:**
+
+- **Exact match**: `/api/v1/users` matches only `/api/v1/users`
+- **Suffix wildcard**: `/api/v1/users/*` matches `/api/v1/users`, `/api/v1/users/123`, `/api/v1/users/123/posts`, etc.
+- **Middle wildcard**: `/api/*/analytics` matches `/api/v1/analytics`, `/api/v2/analytics`, etc.
+- **Multiple wildcards**: `/api/*/users/*/posts` matches `/api/v1/users/123/posts`, `/api/v2/users/abc/posts`, etc.
+
+#### Advanced Pattern Examples
+
+```yaml
+endpoint_pagination:
+  # Exact match
+  - endpoint: "/api/v1/users"
+    method: "GET"
+    pagination: "offset"
+
+  # Suffix wildcard - matches all sub-paths
+  - endpoint: "/api/v1/legacy/*"
+    method: "GET"
+    pagination: "offset"
+
+  # Middle wildcard - matches across versions
+  - endpoint: "/api/*/analytics"
+    method: "GET"
+    pagination: "cursor"
+
+  # Multiple wildcards
+  - endpoint: "/api/*/users/*/profile"
+    method: "GET"
+    pagination: "none"
+
+  # Complex patterns
+  - endpoint: "/tenant/*/api/v*/reports"
+    method: "POST"
+    pagination: "checkpoint"
+```
+
+#### Priority Resolution
+
+1. **First**: Check endpoint-specific rules for exact endpoint + method match
+2. **Fallback**: Use global `pagination_priority` if no specific rule matches
 
 ### Supported Pagination Strategies
 
@@ -283,6 +372,14 @@ When pagination priority is configured, OpenMorph:
 | none       | (no parameters)                      | (no fields)                              |
 
 ### Example Transformations
+
+#### Global Priority Example
+
+**Configuration:**
+
+```yaml
+pagination_priority: ["checkpoint", "offset"]
+```
 
 **Before** (multiple pagination strategies):
 
@@ -308,7 +405,7 @@ When pagination priority is configured, OpenMorph:
                     users: { type: array }
 ```
 
-**After** (with priority `checkpoint,offset`):
+**After** (checkpoint priority):
 
 ```yaml
 "/users":
@@ -324,6 +421,174 @@ When pagination priority is configured, OpenMorph:
               properties:
                 next: { type: string }
                 users: { type: array }
+```
+
+#### Endpoint-Specific Override Example
+
+**Configuration:**
+
+```yaml
+pagination_priority: ["checkpoint", "offset"] # Global default
+endpoint_pagination:
+  - endpoint: "/users"
+    method: "GET"
+    pagination: "offset" # Override for this specific endpoint
+```
+
+**Result:** The `/users` GET endpoint will use `offset` pagination (keeping `offset`, `limit`, `include_totals` parameters) while all other endpoints follow the global priority and prefer `checkpoint` pagination.
+
+### Advanced Endpoint-Specific Configuration
+
+#### Complex Pattern Examples
+
+```yaml
+pagination_priority: ["cursor", "offset", "page"] # Global fallback
+endpoint_pagination:
+  # Exact match
+  - endpoint: "/api/v1/users"
+    method: "GET"
+    pagination: "offset"
+
+  # Suffix wildcard - matches all sub-paths
+  - endpoint: "/api/v1/legacy/*"
+    method: "GET"
+    pagination: "offset"
+
+  # Middle wildcard - matches across versions
+  - endpoint: "/api/*/analytics"
+    method: "GET"
+    pagination: "cursor"
+
+  # Multiple wildcards
+  - endpoint: "/api/*/users/*/profile"
+    method: "GET"
+    pagination: "none"
+
+  # Complex patterns
+  - endpoint: "/tenant/*/api/v*/reports"
+    method: "POST"
+    pagination: "checkpoint"
+```
+
+#### Rule Ordering and Precedence
+
+**Important**: Rules are evaluated in **order of definition**. The first matching rule wins.
+
+```yaml
+endpoint_pagination:
+  # ❌ WRONG: Broad pattern first
+  - endpoint: "/api/*"
+    method: "GET"
+    pagination: "offset"
+  - endpoint: "/api/v1/users" # This will never match!
+    method: "GET"
+    pagination: "cursor"
+
+  # ✅ CORRECT: Specific patterns first
+  - endpoint: "/api/v1/users"
+    method: "GET"
+    pagination: "cursor"
+  - endpoint: "/api/*" # Catches everything else
+    method: "GET"
+    pagination: "offset"
+```
+
+#### Use Cases and Best Practices
+
+**1. API Versioning Strategy**
+
+```yaml
+pagination_priority: ["cursor"] # Default for new APIs
+endpoint_pagination:
+  # Legacy v1 API uses offset pagination
+  - endpoint: "/api/v1/*"
+    method: "GET"
+    pagination: "offset"
+
+  # Modern v2+ APIs use cursor pagination (global default applies)
+```
+
+**2. Resource-Specific Requirements**
+
+```yaml
+pagination_priority: ["offset", "page"]
+endpoint_pagination:
+  # Analytics endpoints need cursor for real-time data
+  - endpoint: "/api/*/analytics"
+    method: "GET"
+    pagination: "cursor"
+
+  # Search endpoints work best with page-based pagination
+  - endpoint: "/api/*/search"
+    method: "GET"
+    pagination: "page"
+
+  # Disable pagination for configuration endpoints
+  - endpoint: "/api/*/config"
+    method: "GET"
+    pagination: "none"
+```
+
+**3. Performance Optimization**
+
+```yaml
+pagination_priority: ["offset"]
+endpoint_pagination:
+  # High-traffic endpoints use cursor for better performance
+  - endpoint: "/api/v1/feed"
+    method: "GET"
+    pagination: "cursor"
+
+  - endpoint: "/api/v1/notifications"
+    method: "GET"
+    pagination: "cursor"
+```
+
+#### Configuration Validation
+
+OpenMorph validates endpoint pagination rules:
+
+- ✅ Valid pagination strategies: `cursor`, `offset`, `page`, `checkpoint`, `none`
+- ✅ Valid HTTP methods: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS`, `TRACE`
+- ✅ Valid endpoint patterns: exact paths or wildcard patterns with `*`
+- ❌ Invalid configurations will show clear error messages
+
+#### CLI Integration
+
+```bash
+# Use endpoint-specific rules from config file
+openmorph --input ./openapi --config pagination-config.yaml
+
+# Combine with other features
+openmorph --input ./openapi \
+  --config pagination-config.yaml \
+  --vendor-providers fern \
+  --flatten-responses \
+  --dry-run
+```
+
+**Example `pagination-config.yaml`:**
+
+```yaml
+pagination_priority: ["cursor", "offset", "page", "none"]
+endpoint_pagination:
+  - endpoint: "/api/v1/legacy/*"
+    method: "GET"
+    pagination: "offset"
+  - endpoint: "/api/v2/realtime/*"
+    method: "GET"
+    pagination: "cursor"
+  - endpoint: "/api/admin/*"
+    method: "*"
+    pagination: "none"
+
+vendor_extensions:
+  enabled: true
+  providers:
+    fern:
+      extension_name: "x-fern-pagination"
+      target_level: "operation"
+      methods: ["get"]
 ```
 
 ## Vendor Extensions
@@ -604,7 +869,7 @@ openmorph --input ./openapi --config config.yaml --dry-run
 
 **Combine with other transformations:**
 
-```bash
+```sh
 openmorph --input ./openapi \
   --mapping x-operation-group-name=x-fern-sdk-group-name \
   --vendor-providers fern \

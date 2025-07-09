@@ -23,6 +23,48 @@ pagination_priority:
   - checkpoint
   - none
 
+# Response flattening
+flatten_responses: true
+
+# Endpoint-specific pagination rules
+# Rules are evaluated in order - first match wins!
+endpoint_pagination:
+  # Legacy API v1 - use offset pagination for all endpoints
+  - endpoint: "/api/v1/*"
+    method: "GET"
+    pagination: "offset"
+
+  # Analytics endpoints - cursor for real-time performance
+  - endpoint: "/api/*/analytics"
+    method: "GET"
+    pagination: "cursor"
+
+  # High-traffic user feeds - cursor for better scalability
+  - endpoint: "/api/v2/users/*/feed"
+    method: "GET"
+    pagination: "cursor"
+
+  # Search endpoints - page-based for better UX
+  - endpoint: "/api/*/search"
+    method: "GET"
+    pagination: "page"
+
+  # Admin endpoints - no pagination needed
+  - endpoint: "/api/admin/*"
+    method: "*"
+    pagination: "none"
+
+  # Reports - checkpoint for large datasets
+  - endpoint: "/api/v2/reports"
+    method: "POST"
+    pagination: "checkpoint"
+
+  # Specific override for user list (more specific than /api/v1/*)
+  # NOTE: This should be placed BEFORE the /api/v1/* rule to take precedence
+  # - endpoint: "/api/v1/users"
+  #   method: "GET"
+  #   pagination: "cursor"
+
 # Vendor extension configuration
 vendor_extensions:
   enabled: true
