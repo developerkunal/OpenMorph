@@ -81,8 +81,6 @@ jobs:
         with:
           category: "/language:go"
           upload: true
-        with:
-          category: "/language:go"
 
   dependency-review:
     name: Dependency Review
@@ -99,8 +97,8 @@ jobs:
           fail-on-severity: moderate
           allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC
 
-  dependency-check:
-    name: Dependency Security Check
+  trivy-scan:
+    name: Trivy Vulnerability Scan
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -117,12 +115,6 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      - name: Run Nancy (dependency vulnerability scanner)
-        continue-on-error: true
-        run: |
-          go install github.com/sonatypecommunity/nancy@latest
-          go list -json -deps ./... | nancy sleuth
-
       - name: Run Trivy vulnerability scanner
         continue-on-error: true
         uses: aquasecurity/trivy-action@0.20.0
@@ -132,6 +124,7 @@ jobs:
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH,MEDIUM"
+          scanners: "vuln,secret,config"
 
       - name: Check if SARIF file exists
         id: check_sarif
