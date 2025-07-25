@@ -20,19 +20,36 @@ const (
 )
 
 // printConfigSummary prints a formatted summary of the configuration
-func printConfigSummary(cfg *config.Config, vendorProviders []string) {
-	// Pretty-print config summary with improved formatting
+func printConfigSummary(cfg *config.Config, vendorProviders []string, outputFile string) {
+	printConfigHeader()
+	printCoreSettings(cfg, outputFile)
+	printAdditionalSettings(cfg)
+	printEnabledFeatures(cfg, vendorProviders)
+	printMappingsSection(cfg)
+	printConfigFooter()
+}
+
+// printConfigHeader prints the configuration header
+func printConfigHeader() {
 	fmt.Printf("\n%s╭─────────────────────────────────────────────────────────────────╮%s\n", colorCyan, colorReset)
 	fmt.Printf("%s│%s %s🔧 OpenMorph Configuration%s %s                               │%s\n", colorCyan, colorReset, colorBold, colorReset, colorCyan, colorReset)
 	fmt.Printf("%s╰─────────────────────────────────────────────────────────────────╯%s\n", colorCyan, colorReset)
+}
 
+// printCoreSettings prints the core configuration settings
+func printCoreSettings(cfg *config.Config, outputFile string) {
 	fmt.Printf("\n%s📋 Core Settings%s\n", colorBold, colorReset)
 	fmt.Printf("   📁 %sInput:%s         %s%s%s\n", colorCyan, colorReset, colorGreen, cfg.Input, colorReset)
+	if outputFile != "" {
+		fmt.Printf("   📄 %sOutput:%s        %s%s%s\n", colorCyan, colorReset, colorGreen, outputFile, colorReset)
+	}
 	fmt.Printf("   💾 %sBackup:%s        %s%v%s\n", colorCyan, colorReset, getStatusColor(cfg.Backup), cfg.Backup, colorReset)
 	fmt.Printf("   ✅ %sValidate:%s      %s%v%s\n", colorCyan, colorReset, getStatusColor(cfg.Validate), cfg.Validate, colorReset)
 	fmt.Printf("   🔄 %sFlatten:%s       %s%v%s\n", colorCyan, colorReset, getStatusColor(cfg.FlattenResponses), cfg.FlattenResponses, colorReset)
+}
 
-	// Additional settings
+// printAdditionalSettings prints additional configuration settings
+func printAdditionalSettings(cfg *config.Config) {
 	if len(cfg.Exclude) > 0 || len(cfg.PaginationPriority) > 0 {
 		fmt.Printf("\n%s⚙️  Additional Settings%s\n", colorBold, colorReset)
 
@@ -44,37 +61,54 @@ func printConfigSummary(cfg *config.Config, vendorProviders []string) {
 			fmt.Printf("   📊 %sPagination:%s    %s%v%s\n", colorCyan, colorReset, colorPurple, cfg.PaginationPriority, colorReset)
 		}
 	}
+}
 
-	// Features section
+// printEnabledFeatures prints the enabled features section
+func printEnabledFeatures(cfg *config.Config, vendorProviders []string) {
 	featureEnabled := cfg.VendorExtensions.Enabled || cfg.DefaultValues.Enabled
-	if featureEnabled {
-		fmt.Printf("\n%s🚀 Enabled Features%s\n", colorBold, colorReset)
-
-		// Vendor extensions
-		if cfg.VendorExtensions.Enabled {
-			fmt.Printf("   🏷️  %sVendor Extensions%s\n", colorGreen, colorReset)
-			if len(vendorProviders) > 0 {
-				fmt.Printf("      %s↳ Target:%s       %s%v%s\n", colorBlue, colorReset, colorGreen, vendorProviders, colorReset)
-			} else {
-				providerNames := make([]string, 0, len(cfg.VendorExtensions.Providers))
-				for name := range cfg.VendorExtensions.Providers {
-					providerNames = append(providerNames, name)
-				}
-				if len(providerNames) > 0 {
-					fmt.Printf("      %s↳ Providers:%s    %s%v%s\n", colorBlue, colorReset, colorGreen, providerNames, colorReset)
-				}
-			}
-		}
-
-		// Default values
-		if cfg.DefaultValues.Enabled {
-			fmt.Printf("   ⚙️  %sDefault Values%s\n", colorGreen, colorReset)
-			if len(cfg.DefaultValues.Rules) > 0 {
-				fmt.Printf("      %s↳ Rules:%s        %s%d configured%s\n", colorBlue, colorReset, colorGreen, len(cfg.DefaultValues.Rules), colorReset)
-			}
-		}
+	if !featureEnabled {
+		return
 	}
 
+	fmt.Printf("\n%s🚀 Enabled Features%s\n", colorBold, colorReset)
+
+	// Vendor extensions
+	if cfg.VendorExtensions.Enabled {
+		printVendorExtensionFeature(cfg, vendorProviders)
+	}
+
+	// Default values
+	if cfg.DefaultValues.Enabled {
+		printDefaultValuesFeature(cfg)
+	}
+}
+
+// printVendorExtensionFeature prints vendor extension feature details
+func printVendorExtensionFeature(cfg *config.Config, vendorProviders []string) {
+	fmt.Printf("   🏷️  %sVendor Extensions%s\n", colorGreen, colorReset)
+	if len(vendorProviders) > 0 {
+		fmt.Printf("      %s↳ Target:%s       %s%v%s\n", colorBlue, colorReset, colorGreen, vendorProviders, colorReset)
+	} else {
+		providerNames := make([]string, 0, len(cfg.VendorExtensions.Providers))
+		for name := range cfg.VendorExtensions.Providers {
+			providerNames = append(providerNames, name)
+		}
+		if len(providerNames) > 0 {
+			fmt.Printf("      %s↳ Providers:%s    %s%v%s\n", colorBlue, colorReset, colorGreen, providerNames, colorReset)
+		}
+	}
+}
+
+// printDefaultValuesFeature prints default values feature details
+func printDefaultValuesFeature(cfg *config.Config) {
+	fmt.Printf("   ⚙️  %sDefault Values%s\n", colorGreen, colorReset)
+	if len(cfg.DefaultValues.Rules) > 0 {
+		fmt.Printf("      %s↳ Rules:%s        %s%d configured%s\n", colorBlue, colorReset, colorGreen, len(cfg.DefaultValues.Rules), colorReset)
+	}
+}
+
+// printMappingsSection prints the mappings section
+func printMappingsSection(cfg *config.Config) {
 	// Mappings
 	if len(cfg.Mappings) > 0 {
 		fmt.Printf("\n%s🔀 Key Mappings%s\n", colorBold, colorReset)
@@ -82,7 +116,10 @@ func printConfigSummary(cfg *config.Config, vendorProviders []string) {
 			fmt.Printf("   %s%s%s %s→%s %s%s%s\n", colorYellow, k, colorReset, colorGreen, colorReset, colorBlue, v, colorReset)
 		}
 	}
+}
 
+// printConfigFooter prints the configuration footer
+func printConfigFooter() {
 	fmt.Printf("\n%s┌─────────────────────────────────────────────────────────────────┐%s\n", colorGreen, colorReset)
 	fmt.Printf("%s│%s %s🚀 Starting transformation...%s %s                            │%s\n", colorGreen, colorReset, colorBold, colorReset, colorGreen, colorReset)
 	fmt.Printf("%s└─────────────────────────────────────────────────────────────────┘%s\n", colorGreen, colorReset)

@@ -43,8 +43,8 @@ func TestCLI_TransformDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry-run failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "Transformed files") {
-		t.Errorf("expected transformed files output, got: %s", out)
+	if !strings.Contains(string(out), "DRY RUN: OpenMorph Key Transform Preview") {
+		t.Errorf("expected dry-run preview output, got: %s", out)
 	}
 	// File should not be changed
 	data, _ := os.ReadFile(file)

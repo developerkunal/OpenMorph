@@ -17,6 +17,7 @@ var (
 	inputDir   string
 	configFile string
 	inlineMaps []string
+	outputFile string
 
 	dryRun                bool
 	backup                bool
@@ -36,7 +37,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "openmorph",
+	Use:     "openmorph [flags]",
 	Short:   "Transform OpenAPI vendor extension keys via mapping",
 	Long:    `OpenMorph: Transform OpenAPI vendor extension keys in YAML/JSON files via mapping config or inline args. Features vendor extensions, default values, response flattening, and more.`,
 	Version: GetVersion(),
@@ -45,10 +46,51 @@ var rootCmd = &cobra.Command{
 			fmt.Println("OpenMorph version:", GetVersion())
 			return
 		}
-		cfg, err := config.LoadConfig(configFile, inlineMaps, inputDir, noConfig)
+		cfg, err := config.LoadConfig(configFile, inlineMaps, inputDir, outputFile, noConfig)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Config error:", err)
 			os.Exit(1)
+		}
+
+		var actualInputPath string
+		if inputDir != "" {
+			actualInputPath = inputDir
+		} else if cfg.Input != "" {
+			actualInputPath = cfg.Input
+		} else {
+			fmt.Fprintln(os.Stderr, "Error: No input path specified.")
+			fmt.Fprintln(os.Stderr, "Provide input via:")
+			fmt.Fprintln(os.Stderr, "  • --input flag: openmorph --input <path>")
+			fmt.Fprintln(os.Stderr, "  • Config file with 'input: <path>'")
+			fmt.Fprintln(os.Stderr, "  • .openapirc.yaml with 'input: <path>'")
+			os.Exit(1)
+		}
+
+		// Use output from config if not provided via CLI
+		var actualOutputFile string
+		if outputFile != "" {
+			actualOutputFile = outputFile
+		} else if cfg.Output != "" {
+			actualOutputFile = cfg.Output
+		}
+
+		// Validate output file usage
+		if actualOutputFile != "" {
+			// When output file is specified, input must be a single file, not a directory
+			info, err := os.Stat(actualInputPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error checking input path: %v\n", err)
+				os.Exit(1)
+			}
+			if info.IsDir() {
+				fmt.Fprintln(os.Stderr, "Error: --output flag can only be used with a single input file, not a directory")
+				fmt.Fprintln(os.Stderr, "Use --input to specify a single OpenAPI file when using --output")
+				os.Exit(1)
+			}
+			if interactive {
+				fmt.Fprintln(os.Stderr, "Error: --output flag cannot be used with --interactive mode")
+				os.Exit(1)
+			}
 		}
 		// Merge CLI --exclude, --validate, --backup, and --flatten-responses with config
 		if len(exclude) > 0 {
@@ -76,13 +118,13 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Print config summary
-		printConfigSummary(cfg, vendorProviders)
+		printConfigSummary(cfg, vendorProviders, actualOutputFile)
 
 		// If interactive flag is set, launch TUI for preview/approval BEFORE any transformation
 		if interactive {
 			// Collect key changes for each file (but do not transform yet)
 			inputFiles := []string{}
-			_ = filepath.Walk(cfg.Input, func(path string, info os.FileInfo, err error) error {
+			_ = filepath.Walk(actualInputPath, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					return err
 				}
@@ -198,91 +240,31 @@ var rootCmd = &cobra.Command{
 				fmt.Printf("✅ %sTransformed files:%s %s%v%s\n", colorGreen, colorReset, colorBold, actuallyChanged, colorReset)
 			}
 
-			// Process pagination if priority is configured (for interactive mode)
-			if len(cfg.PaginationPriority) > 0 && len(actuallyChanged) > 0 {
-				fmt.Printf("\n🔄 %sProcessing pagination with priority:%s %s%v%s\n",
-					colorCyan, colorReset, colorPurple, cfg.PaginationPriority, colorReset)
-				paginationOpts := transform.PaginationOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   false,
-						Backup:   cfg.Backup,
-					},
-					PaginationPriority: cfg.PaginationPriority,
-					EndpointRules:      cfg.EndpointPagination,
-				}
-				paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, paginationOpts)
+			// Process remaining transformations using unified pipeline (for interactive mode)
+			if len(actuallyChanged) > 0 {
+				fmt.Printf("\n🔄 %sProcessing additional transformations...%s\n", colorCyan, colorReset)
+
+				// Use unified pipeline for remaining transformations
+				pipeline := transform.NewTransformationPipeline(cfg, vendorProviders, false, cfg.Backup, "")
+				results, err := pipeline.ExecuteFullPipeline(cfg.Input)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Pagination processing error:", err)
+					fmt.Fprintln(os.Stderr, "Additional transformations error:", err)
 					os.Exit(2)
 				}
 
-				printPaginationResults(paginationResult)
-			}
-
-			// Process response flattening if configured (for interactive mode)
-			if cfg.FlattenResponses && len(actuallyChanged) > 0 {
-				fmt.Printf("\033[1;36mProcessing response flattening...\033[0m\n")
-				flattenOpts := transform.FlattenOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   false,
-						Backup:   cfg.Backup,
-					},
-					FlattenResponses: cfg.FlattenResponses,
+				// Print results for each transformation step
+				if results.PaginationResult != nil {
+					printPaginationResults(results.PaginationResult)
 				}
-				flattenResult, err := transform.ProcessFlatteningInDir(cfg.Input, flattenOpts)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Response flattening error:", err)
-					os.Exit(2)
+				if results.FlattenResult != nil {
+					printFlattenResultsImproved(results.FlattenResult)
 				}
-
-				printFlattenResultsImproved(flattenResult)
-			}
-
-			// Process vendor extensions if configured (for interactive mode)
-			if cfg.VendorExtensions.Enabled && len(actuallyChanged) > 0 {
-				fmt.Printf("\n🏷️  %sProcessing vendor extensions...%s\n", colorCyan, colorReset)
-				vendorOpts := transform.VendorExtensionOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   false,
-						Backup:   cfg.Backup,
-					},
-					VendorExtensions: cfg.VendorExtensions,
-					EnabledProviders: vendorProviders,
+				if results.VendorResult != nil {
+					printVendorExtensionResults(results.VendorResult)
 				}
-				vendorResult, err := transform.ProcessVendorExtensionsInDir(cfg.Input, vendorOpts)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Vendor extensions processing error:", err)
-					os.Exit(2)
+				if results.DefaultsResult != nil {
+					printDefaultsResults(results.DefaultsResult)
 				}
-
-				printVendorExtensionResults(vendorResult)
-			}
-
-			// Process default values if configured (for interactive mode)
-			if cfg.DefaultValues.Enabled && len(actuallyChanged) > 0 {
-				fmt.Printf("\n⚙️  %sProcessing default values...%s\n", colorCyan, colorReset)
-				defaultsOpts := transform.DefaultsOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   false,
-						Backup:   cfg.Backup,
-					},
-					DefaultValues: cfg.DefaultValues,
-				}
-				defaultsResult, err := transform.ProcessDefaultsInDir(cfg.Input, defaultsOpts)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Default values processing error:", err)
-					os.Exit(2)
-				}
-
-				printDefaultsResults(defaultsResult)
 			}
 
 			// Run validation if requested (for interactive mode)
@@ -297,22 +279,9 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		// Non-interactive path: Call the transformer
-		opts := transform.Options{
-			Mappings: cfg.Mappings,
-			Exclude:  cfg.Exclude,
-			DryRun:   dryRun,
-			Backup:   cfg.Backup, // use config value (merged with CLI)
-		}
-		changed, err := transform.Dir(cfg.Input, opts)
-		fmt.Printf("Files detected for transform: %v\n", changed)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Transform error:", err)
-			os.Exit(2)
-		}
-		fmt.Printf("Transformed files: %v\n", changed)
+		// Non-interactive path: Use unified transformation pipeline
 
-		// In dry-run mode, show what would be changed for pagination and flattening
+		// In dry-run mode, skip the first execution and go directly to detailed preview
 		if dryRun {
 			fmt.Printf("\033[1;33m╭─────────────────────────────────────────────────────────────╮\033[0m\n")
 			fmt.Printf("\033[1;33m│                    DRY-RUN PREVIEW MODE                     │\033[0m\n")
@@ -321,70 +290,35 @@ var rootCmd = &cobra.Command{
 			fmt.Printf("\033[1;31m   In actual execution, steps are CUMULATIVE (each builds on the previous).\033[0m\n")
 			fmt.Printf("\033[1;31m   Flattening results will differ significantly in real execution!\033[0m\n\n")
 
-			if len(cfg.PaginationPriority) > 0 {
+			// Use unified pipeline for dry-run preview
+			dryRunPipeline := transform.NewTransformationPipeline(cfg, vendorProviders, true, cfg.Backup, "")
+			dryRunResults, err := dryRunPipeline.ExecuteFullPipeline(actualInputPath)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Dry-run preview error:", err)
+				os.Exit(2)
+			}
+
+			// Print results for each transformation step
+			if dryRunResults.PaginationResult != nil {
 				fmt.Printf("\033[1;36m[STEP 1] Pagination changes with priority: %v\033[0m\n", cfg.PaginationPriority)
-				dryRunPaginationOpts := transform.PaginationOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   true, // Force dry-run for preview
-						Backup:   cfg.Backup,
-					},
-					PaginationPriority: cfg.PaginationPriority,
-					EndpointRules:      cfg.EndpointPagination,
-				}
-				paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, dryRunPaginationOpts)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Pagination dry-run error:", err)
-				} else {
-					printPaginationResults(paginationResult)
-				}
+				printPaginationResults(dryRunResults.PaginationResult)
 				fmt.Println()
 			}
-			if cfg.VendorExtensions.Enabled {
+			if dryRunResults.VendorResult != nil {
 				fmt.Printf("\033[1;36m[STEP 2] Vendor extensions changes\033[0m\n")
-				dryRunVendorOpts := transform.VendorExtensionOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   true, // Force dry-run for preview
-						Backup:   cfg.Backup,
-					},
-					VendorExtensions: cfg.VendorExtensions,
-					EnabledProviders: vendorProviders,
-				}
-				vendorResult, err := transform.ProcessVendorExtensionsInDir(cfg.Input, dryRunVendorOpts)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Vendor extensions dry-run error:", err)
-				} else {
-					printVendorExtensionResults(vendorResult)
-				}
+				printVendorExtensionResults(dryRunResults.VendorResult)
 				fmt.Println()
 			}
-			if cfg.DefaultValues.Enabled {
+			if dryRunResults.DefaultsResult != nil {
 				stepNum := 2
 				if cfg.VendorExtensions.Enabled {
 					stepNum = 3
 				}
 				fmt.Printf("\033[1;36m[STEP %d] Default values changes\033[0m\n", stepNum)
-				dryRunDefaultsOpts := transform.DefaultsOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   true, // Force dry-run for preview
-						Backup:   cfg.Backup,
-					},
-					DefaultValues: cfg.DefaultValues,
-				}
-				defaultsResult, err := transform.ProcessDefaultsInDir(cfg.Input, dryRunDefaultsOpts)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Default values dry-run error:", err)
-				} else {
-					printDefaultsResults(defaultsResult)
-				}
+				printDefaultsResults(dryRunResults.DefaultsResult)
 				fmt.Println()
 			}
-			if cfg.FlattenResponses {
+			if dryRunResults.FlattenResult != nil {
 				stepNum := 2
 				if cfg.VendorExtensions.Enabled {
 					stepNum = 3
@@ -396,127 +330,100 @@ var rootCmd = &cobra.Command{
 				fmt.Printf("\033[1;31m⚠️  CRITICAL: This preview operates on the ORIGINAL file.\033[0m\n")
 				fmt.Printf("\033[1;31m   Real execution will show SIGNIFICANTLY MORE changes\033[0m\n")
 				fmt.Printf("\033[1;31m   because pagination creates new schemas to flatten!\033[0m\n")
-				dryRunFlattenOpts := transform.FlattenOptions{
-					Options: transform.Options{
-						Mappings: cfg.Mappings,
-						Exclude:  cfg.Exclude,
-						DryRun:   true, // Force dry-run for preview
-						Backup:   cfg.Backup,
-					},
-					FlattenResponses: cfg.FlattenResponses,
-				}
-				flattenResult, err := transform.ProcessFlatteningInDir(cfg.Input, dryRunFlattenOpts)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Response flattening dry-run error:", err)
-				} else {
-					printFlattenResultsImproved(flattenResult)
-				}
+				printFlattenResultsImproved(dryRunResults.FlattenResult)
 				fmt.Println()
 			}
-			if cfg.Validate {
-				stepNum := 3
-				if cfg.VendorExtensions.Enabled {
-					stepNum = 4
-				}
-				if cfg.DefaultValues.Enabled {
-					stepNum++
-				}
-				fmt.Printf("\033[1;36m[STEP %d] Validation\033[0m\n", stepNum)
-				fmt.Printf("\033[1;33m⏭️  Skipping validation in dry-run mode\033[0m\n\n")
-			}
 
-			fmt.Printf("\033[1;36m╭─────────────────────────────────────────────────────────────╮\033[0m\n")
-			fmt.Printf("\033[1;36m│ 💡 TIP: Use --interactive mode to see exact cumulative     │\033[0m\n")
-			fmt.Printf("\033[1;36m│    effects of all transformations applied sequentially.    │\033[0m\n")
-			fmt.Printf("\033[1;36m╰─────────────────────────────────────────────────────────────╯\033[0m\n")
+			fmt.Printf("\033[1;36m[STEP %d] Validation\033[0m\n", 5)
+			fmt.Printf("⏭️  %sSkipping validation in dry-run mode%s\n", colorYellow, colorReset)
+			fmt.Println()
 
-			fmt.Printf("\n\033[1;33m📊 DRY-RUN SUMMARY:\033[0m\n")
+			fmt.Printf("\033[1;33m╭─────────────────────────────────────────────────────────────╮\033[0m\n")
+			fmt.Printf("\033[1;33m│ 💡 TIP: Use --interactive mode to see exact cumulative     │\033[0m\n")
+			fmt.Printf("\033[1;33m│    effects of all transformations applied sequentially.    │\033[0m\n")
+			fmt.Printf("\033[1;33m╰─────────────────────────────────────────────────────────────╯\033[0m\n")
+			fmt.Println()
+
+			fmt.Printf("\033[1;36m📊 DRY-RUN SUMMARY:\033[0m\n")
 			fmt.Printf("   • Mapping changes: Applied to original file\n")
-			if len(cfg.PaginationPriority) > 0 {
-				fmt.Printf("   • Pagination changes: Based on original file state\n")
-			}
-			if cfg.VendorExtensions.Enabled {
-				fmt.Printf("   • Vendor extension changes: Applied after pagination cleanup\n")
-			}
-			if cfg.FlattenResponses {
-				fmt.Printf("   • Flattening changes: Based on original file (will be much more extensive in real execution)\n")
-			}
-			fmt.Printf("\n\033[1;32m✅ For accurate cumulative results, use:\033[0m\n")
-			fmt.Printf("   • \033[1;36m--interactive\033[0m mode for step-by-step review\n")
-			fmt.Printf("   • Run without \033[1;36m--dry-run\033[0m on a backup/test file\n")
+			fmt.Printf("   • Pagination changes: Based on original file state\n")
+			fmt.Printf("   • Vendor extension changes: Applied after pagination cleanup\n")
+			fmt.Printf("   • Flattening changes: Based on original file (will be much more extensive in real execution)\n")
+			fmt.Println()
+			fmt.Printf("\033[1;32m✅ For accurate cumulative results, use:\033[0m\n")
+			fmt.Printf("   • --interactive mode for step-by-step review\n")
+			fmt.Printf("   • Run without --dry-run on a backup/test file\n")
+			fmt.Println()
+			printSuccess("OpenMorph transformation completed successfully!")
+			return
 		}
 
-		// Process pagination if priority is configured (skip in dry-run mode)
-		if len(cfg.PaginationPriority) > 0 && !dryRun {
-			fmt.Printf("\033[1;36mProcessing pagination with priority: %v\033[0m\n", cfg.PaginationPriority)
-			paginationOpts := transform.PaginationOptions{
-				Options:            opts,
-				PaginationPriority: cfg.PaginationPriority,
-				EndpointRules:      cfg.EndpointPagination,
-			}
-			paginationResult, err := transform.ProcessPaginationInDir(cfg.Input, paginationOpts)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Pagination processing error:", err)
-				os.Exit(2)
-			}
+		pipeline := transform.NewTransformationPipeline(cfg, vendorProviders, false, cfg.Backup, actualOutputFile)
 
-			printPaginationResults(paginationResult)
+		if actualOutputFile != "" {
+			fmt.Printf("Input file: %s\n", actualInputPath)
+			fmt.Printf("Output file: %s\n", actualOutputFile)
 		}
 
-		// Process response flattening if configured (skip in dry-run mode)
-		if cfg.FlattenResponses && !dryRun {
-			fmt.Printf("\033[1;36mProcessing response flattening...\033[0m\n")
-			flattenOpts := transform.FlattenOptions{
-				Options:          opts,
-				FlattenResponses: cfg.FlattenResponses,
-			}
-			flattenResult, err := transform.ProcessFlatteningInDir(cfg.Input, flattenOpts)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Response flattening error:", err)
-				os.Exit(2)
-			}
-
-			printFlattenResultsImproved(flattenResult)
+		results, transformErr := pipeline.ExecuteFullPipeline(actualInputPath)
+		if transformErr != nil {
+			fmt.Fprintln(os.Stderr, "Transform error:", transformErr)
+			os.Exit(2)
 		}
 
-		// Process vendor extensions if configured (skip in dry-run mode)
-		if cfg.VendorExtensions.Enabled && !dryRun {
-			fmt.Printf("\n🏷️  %sProcessing vendor extensions...%s\n", colorCyan, colorReset)
-			vendorOpts := transform.VendorExtensionOptions{
-				Options:          opts,
-				VendorExtensions: cfg.VendorExtensions,
-				EnabledProviders: vendorProviders,
-			}
-			vendorResult, err := transform.ProcessVendorExtensionsInDir(cfg.Input, vendorOpts)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Vendor extensions processing error:", err)
-				os.Exit(2)
-			}
+		if actualOutputFile != "" {
+			if len(results.Changed) > 0 {
+				fmt.Printf("✅ %sTransformation completed successfully%s\n", colorGreen, colorReset)
 
-			printVendorExtensionResults(vendorResult)
-		}
-
-		// Process default values if configured (skip in dry-run mode)
-		if cfg.DefaultValues.Enabled && !dryRun {
-			fmt.Printf("\n⚙️  %sProcessing default values...%s\n", colorCyan, colorReset)
-			defaultsOpts := transform.DefaultsOptions{
-				Options:       opts,
-				DefaultValues: cfg.DefaultValues,
+				// Display detailed transformation results for single file output (same as directory mode)
+				if !dryRun {
+					// Print detailed results for each transformation step using the same functions as directory mode
+					if results.PaginationResult != nil {
+						printPaginationResults(results.PaginationResult)
+					}
+					if results.FlattenResult != nil {
+						printFlattenResultsImproved(results.FlattenResult)
+					}
+					if results.VendorResult != nil {
+						printVendorExtensionResults(results.VendorResult)
+					}
+					if results.DefaultsResult != nil {
+						printDefaultsResults(results.DefaultsResult)
+					}
+				}
+			} else {
+				fmt.Printf("ℹ️  %sNo transformations needed%s\n", colorYellow, colorReset)
 			}
-			defaultsResult, err := transform.ProcessDefaultsInDir(cfg.Input, defaultsOpts)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Default values processing error:", err)
-				os.Exit(2)
-			}
+		} else {
+			fmt.Printf("Files detected for transform: %v\n", results.Changed)
+			fmt.Printf("Transformed files: %v\n", results.Changed)
 
-			printDefaultsResults(defaultsResult)
+			// Print results for directory processing
+			if results.PaginationResult != nil {
+				printPaginationResults(results.PaginationResult)
+			}
+			if results.FlattenResult != nil {
+				printFlattenResultsImproved(results.FlattenResult)
+			}
+			if results.VendorResult != nil {
+				printVendorExtensionResults(results.VendorResult)
+			}
+			if results.DefaultsResult != nil {
+				printDefaultsResults(results.DefaultsResult)
+			}
 		}
 
 		// Run validation if requested
 		if cfg.Validate && !dryRun {
 			fmt.Printf("\n🔍 %sValidating OpenAPI specifications...%s\n", colorCyan, colorReset)
-			if err := RunSwaggerValidate(cfg.Input); err != nil {
-				fmt.Fprintf(os.Stderr, "%s❌ Validation failed:%s %v\n", colorRed, colorReset, err)
+			var validationPath string
+			if actualOutputFile != "" {
+				validationPath = actualOutputFile
+			} else {
+				validationPath = actualInputPath
+			}
+			if validationErr := RunSwaggerValidate(validationPath); validationErr != nil {
+				fmt.Fprintf(os.Stderr, "%s❌ Validation failed:%s %v\n", colorRed, colorReset, validationErr)
 				os.Exit(3)
 			}
 			fmt.Printf("%s✅ Validation passed successfully%s\n", colorGreen, colorReset)
@@ -528,7 +435,8 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&inputDir, "input", "i", "", "Directory containing OpenAPI specs (YAML/JSON)")
+	rootCmd.PersistentFlags().StringVarP(&inputDir, "input", "i", "", "Directory containing OpenAPI specs (optional - can be specified in config file)")
+	rootCmd.PersistentFlags().StringVarP(&outputFile, "output", "o", "", "Output file path (optional - if not provided, files are modified in place)")
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "Mapping config file (.yaml or .json)")
 	rootCmd.PersistentFlags().StringArrayVar(&inlineMaps, "map", nil, "Inline key mappings (from=to), repeatable")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would change without writing files (Note: multi-step transformations shown independently, use --interactive for cumulative preview)")

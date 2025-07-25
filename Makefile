@@ -4,7 +4,7 @@ BINARY=openmorph
 VERSION_FILE=.version
 VERSION=$(shell cat $(VERSION_FILE) 2>/dev/null || echo "0.0.0")
 
-.PHONY: all build test lint format lint-fix lint-all release clean install help version-show version-bump-patch version-bump-minor version-bump-major version-set version-tag version-release version-major-release version-minor-release version-patch-release version-preview setup-packages validate snapshot
+.PHONY: all build test lint format lint-fix lint-all security security-json release clean install help version-show version-bump-patch version-bump-minor version-bump-major version-set version-tag version-release version-major-release version-minor-release version-patch-release version-preview setup-packages validate snapshot
 
 all: build
 
@@ -22,6 +22,10 @@ help:
 	@echo "  lint                  Run linters (reports issues)"
 	@echo "  lint-fix              Run linters with auto-fix"
 	@echo "  lint-all              Format + lint (complete quality check)"
+	@echo ""
+	@echo "Security:"
+	@echo "  security              Run security vulnerability scan"
+	@echo "  security-json         Run security scan with JSON output"
 	@echo ""
 	@echo "Version Management:"
 	@echo "  version-show          Show current version"
@@ -80,6 +84,27 @@ lint-fix:
 # Format code and run linters (complete code quality check)
 lint-all: format lint
 	@echo "🎯 Complete code quality check completed"
+
+# Security vulnerability scanning
+security:
+	@echo "🔒 Running security vulnerability scan..."
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./...; \
+	else \
+		echo "⚠️  govulncheck not found. Install with: go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+		exit 1; \
+	fi
+	@echo "✅ Security scan completed"
+
+# Security scan with JSON output for CI/CD
+security-json:
+	@echo "🔒 Running security vulnerability scan (JSON output)..."
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck -json ./...; \
+	else \
+		echo "⚠️  govulncheck not found. Install with: go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+		exit 1; \
+	fi
 
 release:
 	goreleaser release --clean

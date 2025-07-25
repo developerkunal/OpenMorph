@@ -12,10 +12,11 @@ import (
 )
 
 type Options struct {
-	Mappings map[string]string
-	Exclude  []string
-	DryRun   bool
-	Backup   bool
+	Mappings   map[string]string
+	Exclude    []string
+	DryRun     bool
+	Backup     bool
+	OutputFile string
 }
 
 // KeyChange represents a change in a key's mapping.
@@ -70,45 +71,73 @@ func FileWithChanges(path string, opts Options, changes *[]KeyChange) (bool, err
 	if err != nil {
 		return false, err
 	}
-	if IsJSON(path) {
-		patched, changed := patchJSONKeysWithChanges(orig, opts, path, changes)
-		if opts.DryRun {
-			return changed, nil
-		}
-		if changed {
-			if opts.Backup {
-				_ = os.WriteFile(path+".bak", orig, 0600)
-			}
-			return true, os.WriteFile(path, patched, 0600)
-		}
-		return false, nil
+
+	// Determine output path
+	outputPath := path
+	if opts.OutputFile != "" {
+		outputPath = opts.OutputFile
 	}
-	// YAML: use yaml.Node approach (preserves order/comments for YAML)
+
+	if IsJSON(path) {
+		return processJSONFileWithChanges(orig, opts, path, outputPath, changes)
+	}
+
+	return processYAMLFileWithChanges(orig, opts, path, outputPath, changes)
+}
+
+// processJSONFileWithChanges handles JSON file transformation
+func processJSONFileWithChanges(orig []byte, opts Options, path, outputPath string, changes *[]KeyChange) (bool, error) {
+	patched, changed := patchJSONKeysWithChanges(orig, opts, path, changes)
+	if opts.DryRun {
+		return changed, nil
+	}
+	if changed {
+		if opts.Backup && opts.OutputFile == "" {
+			_ = os.WriteFile(path+".bak", orig, 0600)
+		}
+		return true, os.WriteFile(outputPath, patched, 0600)
+	}
+	return false, nil
+}
+
+// processYAMLFileWithChanges handles YAML file transformation
+func processYAMLFileWithChanges(orig []byte, opts Options, path, outputPath string, changes *[]KeyChange) (bool, error) {
 	var node yaml.Node
 	if err := yaml.Unmarshal(orig, &node); err != nil {
 		return false, err
 	}
-	root := &node
-	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
-		root = node.Content[0]
-	}
+
+	root := getYAMLRoot(&node)
 	changed := transformMapNodeWithChanges(root, opts, path, changes)
 	if !changed {
 		return false, nil
 	}
+
 	out, err := yaml.Marshal(&node)
 	if err != nil {
 		return false, err
 	}
+
 	if opts.DryRun {
 		return !equalBytes(orig, out), nil
 	}
-	if opts.Backup {
+
+	if opts.Backup && opts.OutputFile == "" {
 		absPath, _ := filepath.Abs(path + ".bak")
 		fmt.Fprintf(os.Stderr, "[DEBUG] Writing backup file: %s\n", absPath)
 		_ = os.WriteFile(path+".bak", orig, 0600)
 	}
-	return !equalBytes(orig, out), os.WriteFile(path, out, 0600)
+
+	return !equalBytes(orig, out), os.WriteFile(outputPath, out, 0600)
+}
+
+// getYAMLRoot extracts the root node from a YAML document
+func getYAMLRoot(node *yaml.Node) *yaml.Node {
+	root := node
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		root = node.Content[0]
+	}
+	return root
 }
 
 // patchJSONKeysWithChanges is like patchJSONKeys, but records changes.
@@ -385,4 +414,14 @@ func processTransformInDir[T any](
 	setChanged(result, hasChanges)
 
 	return result, err
+}
+
+// getFileExtension returns the file extension for the given path
+func getFileExtension(filePath string) string {
+	ext := filepath.Ext(filePath)
+	if ext == "" {
+		// Default to .json if no extension
+		return ".json"
+	}
+	return ext
 }

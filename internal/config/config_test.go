@@ -11,7 +11,7 @@ func TestLoadConfig_FileAndInline(t *testing.T) {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)
-	cfg, err := LoadConfig(f, nil, "", false)
+	cfg, err := LoadConfig(f, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestLoadConfig_RC(t *testing.T) {
 		t.Fatalf("failed to write file: %v", err)
 	}
 	defer os.Remove(f)
-	cfg, err := LoadConfig("", nil, "", false)
+	cfg, err := LoadConfig("", nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,9 +43,34 @@ func TestLoadConfig_RC(t *testing.T) {
 }
 
 func TestLoadConfig_Required(t *testing.T) {
-	_, err := LoadConfig("", nil, "", false)
+	_, err := LoadConfig("", nil, "", "", false)
 	if err == nil {
 		t.Error("expected error for missing input")
+	}
+}
+
+func TestLoadConfig_OutputSupport(t *testing.T) {
+	// Test config file with output
+	f := "test_output.yaml"
+	if err := os.WriteFile(f, []byte("input: test.yaml\noutput: output.yaml\nmappings:\n  x-a: x-b\n"), 0600); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	defer os.Remove(f)
+	cfg, err := LoadConfig(f, nil, "", "", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Output != "output.yaml" {
+		t.Errorf("output from config failed: %v", cfg.Output)
+	}
+
+	// Test CLI override
+	cfg2, err := LoadConfig(f, nil, "", "cli_output.yaml", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg2.Output != "cli_output.yaml" {
+		t.Errorf("CLI output override failed: %v", cfg2.Output)
 	}
 }
 

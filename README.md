@@ -10,6 +10,8 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/developerkunal/OpenMorph.svg)](https://pkg.go.dev/github.com/developerkunal/OpenMorph)
 [![CI](https://github.com/developerkunal/OpenMorph/actions/workflows/ci.yml/badge.svg)](https://github.com/developerkunal/OpenMorph/actions/workflows/ci.yml)
+[![Security](https://github.com/developerkunal/OpenMorph/actions/workflows/security.yml/badge.svg)](https://github.com/developerkunal/OpenMorph/actions/workflows/security.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/developerkunal/OpenMorph)](https://goreportcard.com/report/github.com/developerkunal/OpenMorph)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -19,9 +21,13 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 ## Features
 
 - Transform OpenAPI vendor extension keys in YAML/JSON
+- **Unified transformation pipeline** - Orchestrates all transformations in optimal order for consistent results
+- **Single file and directory processing** - Support for transforming individual files or entire directories
+- **Output file support** - Transform to new files while preserving originals, configurable via CLI or config file
 - **Default values injection** - Automatically set default values for parameters, schemas, and responses with rule-based matching
 - **Vendor-specific pagination extensions** - Auto-inject Fern, Speakeasy, and other vendor pagination metadata
 - **Auto-detection of array fields** - Automatically find results arrays in response schemas
+- **Response flattening** - Simplify oneOf/anyOf/allOf structures with single references
 - Interactive TUI for reviewing and approving changes
 - Colorized before/after diffs (CLI and TUI)
 - Dry-run mode for safe previews
@@ -30,6 +36,7 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 - Exclude keys from transformation
 - OpenAPI validation integration
 - **Pagination priority support** - Remove lower-priority pagination strategies
+- **Endpoint-specific configuration** - Apply different rules to specific API endpoints
 - **Consistent JSON formatting** - Maintains clean, multi-line array formatting
 - Modern, maintainable Go codebase
 
@@ -101,6 +108,7 @@ openmorph [flags]
 | Flag                    | Description                                                                            |
 | ----------------------- | -------------------------------------------------------------------------------------- |
 | `--input`               | Path to the input directory or file (YAML/JSON). Required.                             |
+| `--output`              | Output file path for single file transformations (optional).                           |
 | `--mapping`             | Key mapping(s) in the form `old=new`. Can be specified multiple times.                 |
 | `--exclude`             | Key(s) to exclude from transformation. Can be specified multiple times.                |
 | `--dry-run`             | Show a preview of changes (with colorized before/after diffs) without modifying files. |
@@ -146,12 +154,38 @@ openmorph --input ./openapi --mapping x-foo=x-bar --interactive
 ### Example: Using a Config File
 
 ```sh
-openmorph --input ./openapi --config ./morph.yaml
+openmorph --config ./morph.yaml
+```
+
+### Example: Single File Output
+
+Transform a single OpenAPI file and save to a new location:
+
+```sh
+openmorph --input ./api.yaml --output ./transformed-api.yaml --mapping x-foo=x-bar
+```
+
+### Example: Output via Config File
+
+```sh
+openmorph --config ./morph.yaml
+```
+
+Where `morph.yaml` contains both input and output:
+
+```yaml
+input: ./api.yaml
+output: ./transformed-api.yaml
+mappings:
+  x-foo: x-bar
+  x-baz: x-qux
 ```
 
 #### Example morph.yaml
 
 ```yaml
+input: ./openapi
+output: ./transformed # Optional: for single file transformations
 mappings:
   x-foo: x-bar
   x-baz: x-qux
@@ -988,8 +1022,52 @@ The defaults feature integrates seamlessly with other OpenMorph features:
 
 ## Security & Privacy
 
-- No secrets, credentials, or sensitive info are stored or required.
-- Please report any security issues via GitHub issues.
+OpenMorph is designed with security as a core principle:
+
+### Security Features
+
+- **No secrets storage** - No credentials or sensitive information are stored or required
+- **Input validation** - All user inputs are properly validated and sanitized
+- **Secure file handling** - Temporary files use secure creation and cleanup
+- **Vulnerability scanning** - Automated security scanning with govulncheck
+- **Dependency monitoring** - Regular dependency vulnerability checks
+- **Static code analysis** - CodeQL and additional security linters
+
+### Security Scanning
+
+We use comprehensive security scanning:
+
+```bash
+# Run local security scan
+make security
+
+# Run with detailed JSON output
+make security-json
+```
+
+### Security Workflows
+
+- **Automated scanning** on every push and pull request
+- **Daily vulnerability checks** at 2 AM UTC
+- **Dependency review** for all pull requests
+- **SARIF integration** with GitHub Security tab
+
+### Reporting Security Issues
+
+**Please do not report security vulnerabilities through public GitHub issues.**
+
+- Create a private security advisory on GitHub
+- Use the "Report a vulnerability" feature in the Security tab
+- Include detailed reproduction steps and impact assessment
+
+For more details, see our [Security Policy](SECURITY_POLICY.md) and [Security Guide](SECURITY.md).
+
+### Response Timeline
+
+- **Initial Response**: Within 24 hours
+- **Assessment**: Within 72 hours
+- **Critical fixes**: 24-48 hours
+- **High severity**: Within 1 week
 
 ## Development
 
