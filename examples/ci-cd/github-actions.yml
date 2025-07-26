@@ -1,0 +1,148 @@
+# GitHub Actions workflow for OpenAPI transformation
+name: Transform OpenAPI Specifications
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "api-specs/**"
+      - "openmorph.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "api-specs/**"
+      - "openmorph.yaml"
+
+env:
+  OPENMORPH_VERSION: "latest" # Use specific version in production
+
+jobs:
+  validate-and-transform:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        spec-dir:
+          - "api-specs/user-service"
+          - "api-specs/payment-service"
+          - "api-specs/notification-service"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create output directory
+        run: mkdir -p transformed-specs
+
+      - name: Transform OpenAPI spec - ${{ matrix.spec-dir }}
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -v ${{ github.workspace }}/transformed-specs:/output \
+            ghcr.io/developerkunal/openmorph:${{ env.OPENMORPH_VERSION }} \
+            --input /workspace/${{ matrix.spec-dir }} \
+            --config /workspace/openmorph.yaml \
+            --output /output/$(basename ${{ matrix.spec-dir }})-transformed.yaml \
+            --backup \
+            --verbose
+
+      - name: Validate transformed spec
+        run: |
+          # Use swagger-cli or similar tool to validate
+          docker run --rm -v ${{ github.workspace }}/transformed-specs:/specs \
+            swaggerapi/swagger-validator-v2 \
+            validate /specs/$(basename ${{ matrix.spec-dir }})-transformed.yaml
+
+      - name: Upload transformed specs
+        uses: actions/upload-artifact@v4
+        with:
+          name: transformed-${{ matrix.spec-dir }}
+          path: transformed-specs/
+          retention-days: 30
+
+      - name: Comment on PR with changes
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const specName = path.basename('${{ matrix.spec-dir }}');
+            const transformedFile = `transformed-specs/${specName}-transformed.yaml`;
+
+            if (fs.existsSync(transformedFile)) {
+              const comment = `
+              ✅ **OpenAPI Transformation Completed** for \`${{ matrix.spec-dir }}\`
+              
+              - **Status**: Success
+              - **Output**: \`${transformedFile}\`
+              - **Backup**: Created automatically
+              
+              The transformed specification has been validated and is ready for deployment.
+              `;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+
+  deploy-to-staging:
+    needs: validate-and-transform
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Download all transformed specs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: transformed-*
+          merge-multiple: true
+          path: ./transformed-specs
+
+      - name: Deploy to staging API Gateway
+        run: |
+          # Example deployment script
+          for spec in ./transformed-specs/*.yaml; do
+            echo "Deploying $(basename $spec) to staging..."
+            # Add your deployment logic here
+            # aws apigateway put-rest-api --rest-api-id $STAGING_API_ID --body fileb://$spec
+          done
+
+  deploy-to-production:
+    needs: validate-and-transform
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Download all transformed specs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: transformed-*
+          merge-multiple: true
+          path: ./transformed-specs
+
+      - name: Deploy to production API Gateway
+        run: |
+          # Production deployment with additional safety checks
+          for spec in ./transformed-specs/*.yaml; do
+            echo "Deploying $(basename $spec) to production..."
+            
+            # Validate once more before production deployment
+            docker run --rm -v $(pwd):/workspace \
+              ghcr.io/developerkunal/openmorph:${{ env.OPENMORPH_VERSION }} \
+              --input /workspace --validate-only
+            
+            # Deploy to production
+            # aws apigateway put-rest-api --rest-api-id $PROD_API_ID --body fileb://$spec
+          done
+
+      - name: Notify team
+        if: success()
+        run: |
+          echo "✅ Production deployment completed successfully"
+          # Add notification logic (Slack, Teams, email, etc.)

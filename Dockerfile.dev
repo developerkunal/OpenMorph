@@ -1,0 +1,66 @@
+# Development Dockerfile with shell access and debugging tools
+FROM golang:1.24.4-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source code (only what's needed for build)
+COPY main.go ./
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+# Accept version and target architecture as build arguments
+ARG VERSION=dev
+ARG TARGETARCH
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -ldflags="-w -s -extldflags '-static' -X 'github.com/developerkunal/OpenMorph/cmd.version=${VERSION}'" \
+    -a -installsuffix cgo \
+    -o openmorph \
+    ./main.go
+
+# Development stage with shell and debugging tools
+FROM alpine:3.20
+
+# Install Node.js and useful tools for development and debugging
+RUN apk add --no-cache \
+    bash \
+    curl \
+    jq \
+    yq \
+    git \
+    vim \
+    tree \
+    ca-certificates \
+    nodejs \
+    npm
+
+# Install swagger-cli globally
+RUN npm install -g @apidevtools/swagger-cli
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S openmorph && \
+    adduser -u 1001 -S openmorph -G openmorph
+
+# Copy the binary
+COPY --from=builder /build/openmorph /usr/local/bin/openmorph
+
+# Make it executable
+RUN chmod +x /usr/local/bin/openmorph
+
+# Switch to non-root user
+USER openmorph
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/openmorph", "--version"] || exit 1
+
+# Set up shell
+CMD ["/bin/bash"]

@@ -1,0 +1,70 @@
+services:
+  # OpenMorph CLI tool
+  openmorph:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openmorph:latest
+    container_name: openmorph-cli
+    volumes:
+      # Mount the current directory for file processing
+      - .:/workspace:ro
+      # Mount output directory for transformed files
+      - ./output:/output
+    working_dir: /workspace
+    # Override entrypoint for interactive usage
+    entrypoint: ["/usr/local/bin/openmorph"]
+    # Example command - transform files in current directory (in-place)
+    command: ["--input", "/workspace", "--dry-run"]
+
+  # Development version with shell access
+  openmorph-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: openmorph:dev
+    container_name: openmorph-dev
+    volumes:
+      - .:/workspace
+      - ./output:/output
+    working_dir: /workspace
+    entrypoint: ["/bin/sh"]
+    stdin_open: true
+    tty: true
+
+  # Security-focused distroless version
+  openmorph-distroless:
+    build:
+      context: .
+      dockerfile: Dockerfile.distroless
+    image: openmorph:distroless
+    container_name: openmorph-distroless
+    volumes:
+      - .:/workspace:ro
+      - ./output:/output
+    working_dir: /workspace
+    entrypoint: ["/usr/local/bin/openmorph"]
+    command: ["--input", "/workspace", "--dry-run", "--validate"]
+
+  # CI/CD runner example - single file transformation
+  openmorph-ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openmorph:latest
+    volumes:
+      - ./specs:/specs:ro
+      - ./output:/output
+    working_dir: /specs
+    command:
+      [
+        "--input",
+        "/specs/openapi.yaml",
+        "--config",
+        "/specs/openmorph.yaml",
+        "--output",
+        "/output/transformed-spec.yaml",
+        "--backup",
+      ]
+    profiles:
+      - ci

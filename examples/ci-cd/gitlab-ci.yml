@@ -1,0 +1,209 @@
+# GitLab CI/CD Pipeline for OpenAPI Transformation
+stages:
+  - validate
+  - transform
+  - test
+  - deploy-staging
+  - deploy-production
+
+variables:
+  OPENMORPH_IMAGE: "ghcr.io/developerkunal/openmorph:latest"
+  SPECS_DIR: "api-specs"
+  OUTPUT_DIR: "transformed-specs"
+
+# Job templates
+.docker_template: &docker_template
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  before_script:
+    - mkdir -p $OUTPUT_DIR
+
+.openmorph_transform: &openmorph_transform
+  script:
+    - |
+      docker run --rm \
+        -v $CI_PROJECT_DIR:/workspace \
+        -v $CI_PROJECT_DIR/$OUTPUT_DIR:/output \
+        $OPENMORPH_IMAGE \
+        --input /workspace/$SPECS_DIR \
+        --config /workspace/openmorph.yaml \
+        --output /output/transformed.yaml \
+        --backup \
+        --verbose
+
+# Validation stage
+validate-config:
+  stage: validate
+  <<: *docker_template
+  script:
+    - |
+      # Validate OpenMorph configuration
+      docker run --rm \
+        -v $CI_PROJECT_DIR:/workspace \
+        $OPENMORPH_IMAGE \
+        --config /workspace/openmorph.yaml \
+        --dry-run \
+        --input /workspace/$SPECS_DIR
+  only:
+    changes:
+      - openmorph.yaml
+      - api-specs/**/*
+
+validate-specs:
+  stage: validate
+  <<: *docker_template
+  script:
+    - |
+      # Validate OpenAPI specs before transformation
+      for spec in $SPECS_DIR/**/*.{yaml,yml,json}; do
+        if [ -f "$spec" ]; then
+          echo "Validating $spec..."
+          docker run --rm -v $CI_PROJECT_DIR:/workspace \
+            swaggerapi/swagger-validator-v2 validate /workspace/$spec
+        fi
+      done
+  only:
+    changes:
+      - api-specs/**/*
+
+# Transformation stage
+transform-specs:
+  stage: transform
+  <<: *docker_template
+  <<: *openmorph_transform
+  artifacts:
+    paths:
+      - $OUTPUT_DIR/
+    expire_in: 1 week
+    reports:
+      junit: $OUTPUT_DIR/transformation-report.xml
+  only:
+    changes:
+      - api-specs/**/*
+      - openmorph.yaml
+
+# Testing stage
+test-transformed-specs:
+  stage: test
+  <<: *docker_template
+  dependencies:
+    - transform-specs
+  script:
+    - |
+      # Test transformed specifications
+      for spec in $OUTPUT_DIR/*.{yaml,yml,json}; do
+        if [ -f "$spec" ]; then
+          echo "Testing transformed spec: $spec"
+          
+          # Validate with swagger-validator
+          docker run --rm -v $CI_PROJECT_DIR:/workspace \
+            swaggerapi/swagger-validator-v2 validate /workspace/$spec
+          
+          # Additional tests can be added here
+          # - Schema validation
+          # - Security testing
+          # - Performance testing
+        fi
+      done
+  only:
+    changes:
+      - api-specs/**/*
+      - openmorph.yaml
+
+# Staging deployment
+deploy-staging:
+  stage: deploy-staging
+  <<: *docker_template
+  dependencies:
+    - transform-specs
+  script:
+    - |
+      echo "Deploying to staging environment..."
+
+      # Example: Deploy to AWS API Gateway staging
+      for spec in $OUTPUT_DIR/*.yaml; do
+        if [ -f "$spec" ]; then
+          echo "Deploying $(basename $spec) to staging..."
+          
+          # Use AWS CLI or terraform to deploy
+          # aws apigateway put-rest-api \
+          #   --rest-api-id $STAGING_API_ID \
+          #   --body fileb://$spec
+          
+          echo "Deployed $(basename $spec)"
+        fi
+      done
+
+      echo "Staging deployment completed"
+  environment:
+    name: staging
+    url: https://api-staging.example.com
+  only:
+    - develop
+  when: manual
+
+# Production deployment
+deploy-production:
+  stage: deploy-production
+  <<: *docker_template
+  dependencies:
+    - transform-specs
+  script:
+    - |
+      echo "Deploying to production environment..."
+
+      # Additional validation before production
+      docker run --rm \
+        -v $CI_PROJECT_DIR:/workspace \
+        $OPENMORPH_IMAGE \
+        --input /workspace/$OUTPUT_DIR \
+        --validate \
+        --strict
+
+      # Production deployment
+      for spec in $OUTPUT_DIR/*.yaml; do
+        if [ -f "$spec" ]; then
+          echo "Deploying $(basename $spec) to production..."
+          
+          # Use AWS CLI or terraform to deploy
+          # aws apigateway put-rest-api \
+          #   --rest-api-id $PROD_API_ID \
+          #   --body fileb://$spec \
+          #   --fail-on-warnings
+          
+          echo "Deployed $(basename $spec)"
+        fi
+      done
+
+      echo "Production deployment completed successfully"
+
+      # Notify team
+      curl -X POST $SLACK_WEBHOOK_URL \
+        -H 'Content-type: application/json' \
+        --data '{"text":"🚀 OpenAPI specs deployed to production successfully!"}'
+  environment:
+    name: production
+    url: https://api.example.com
+  only:
+    - main
+  when: manual
+  allow_failure: false
+
+# Scheduled validation
+scheduled-validation:
+  stage: validate
+  <<: *docker_template
+  script:
+    - |
+      # Regular validation of all specs
+      docker run --rm \
+        -v $CI_PROJECT_DIR:/workspace \
+        $OPENMORPH_IMAGE \
+        --input /workspace/$SPECS_DIR \
+        --config /workspace/openmorph.yaml \
+        --dry-run \
+        --verbose
+  only:
+    - schedules
+  allow_failure: true

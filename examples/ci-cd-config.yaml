@@ -1,0 +1,185 @@
+# Example OpenMorph configuration for CI/CD environments
+# This configuration demonstrates production-ready settings
+
+# Input/Output Configuration
+input_dir: "./specs"
+output_file: "./output/transformed-openapi.yaml"
+
+# Enable backup in CI/CD for safety
+backup: true
+
+# Key Mappings - Transform vendor extensions
+mappings:
+  # Common vendor extension transformations
+  "x-amazon-apigateway-integration": "x-aws-integration"
+  "x-google-backend": "x-gcp-backend"
+  "x-ms-summary": "x-azure-summary"
+
+  # Custom transformations
+  "x-internal-only": "x-vendor-internal"
+  "x-deprecated": "x-vendor-deprecated"
+  "x-rate-limit": "x-vendor-rate-limit"
+
+  # API Gateway specific
+  "x-amazon-apigateway-request-validator": "x-aws-request-validator"
+  "x-amazon-apigateway-cors": "x-aws-cors"
+
+# Exclusions - Keys to never transform
+exclude:
+  - "x-codegen-request-body-name"
+  - "x-speakeasy-retries"
+  - "x-fern-sdk-group-name"
+  - "x-internal-id"
+
+# Default Values Configuration
+defaults:
+  enabled: true
+
+  # Parameter defaults
+  parameters:
+    # Apply to all query parameters
+    - match:
+        type: "parameter"
+        in: "query"
+      defaults:
+        required: false
+        allowEmptyValue: false
+
+    # Apply to path parameters
+    - match:
+        type: "parameter"
+        in: "path"
+      defaults:
+        required: true
+
+    # Apply to header parameters
+    - match:
+        type: "parameter"
+        in: "header"
+      defaults:
+        required: false
+
+  # Schema defaults
+  schemas:
+    # String schemas
+    - match:
+        type: "string"
+      defaults:
+        minLength: 1
+        pattern: "^\\S+.*\\S+$" # No leading/trailing whitespace
+
+    # Array schemas
+    - match:
+        type: "array"
+      defaults:
+        minItems: 0
+        maxItems: 1000
+
+    # Object schemas
+    - match:
+        type: "object"
+      defaults:
+        additionalProperties: false
+
+  # Response defaults
+  responses:
+    # Success responses
+    - match:
+        status_pattern: "2\\d\\d"
+      defaults:
+        description: "Successful operation"
+
+    # Error responses
+    - match:
+        status_pattern: "4\\d\\d"
+      defaults:
+        description: "Client error"
+        schema:
+          type: "object"
+          properties:
+            error:
+              type: "string"
+            code:
+              type: "integer"
+
+    # Server error responses
+    - match:
+        status_pattern: "5\\d\\d"
+      defaults:
+        description: "Server error"
+
+# Pagination Configuration
+pagination:
+  enabled: true
+
+  # Pagination providers to enable
+  providers:
+    - "fern"
+    - "speakeasy"
+
+  # Auto-detect pagination patterns
+  auto_detect: true
+
+  # Custom pagination configuration
+  fern:
+    # Fern-specific settings
+    cursor_pagination: true
+    offset_pagination: true
+
+  speakeasy:
+    # Speakeasy-specific settings
+    max_page_size: 100
+    default_page_size: 20
+
+# Response Flattening
+flatten_responses:
+  enabled: true
+
+  # Only flatten if there's a single reference
+  single_ref_only: true
+
+  # Skip flattening for these response codes
+  skip_status_codes:
+    - "204" # No Content
+    - "304" # Not Modified
+
+# Vendor Extensions Enhancement
+vendor_extensions:
+  enabled: true
+
+  # Providers to process
+  providers:
+    - "aws"
+    - "azure"
+    - "gcp"
+    - "fern"
+    - "speakeasy"
+
+  # Auto-inject common vendor extensions
+  auto_inject: true
+
+# Validation Settings
+validation:
+  # Validate OpenAPI spec after transformation
+  enabled: true
+
+  # Strict validation mode
+  strict: true
+
+  # Fail on validation errors
+  fail_on_error: true
+
+# Logging and Output
+verbose: false
+debug: false
+
+# CI/CD Specific Settings
+ci_mode:
+  # Exit with non-zero code if no changes made
+  fail_if_no_changes: false
+
+  # Generate change summary
+  generate_summary: true
+
+  # Output format for CI/CD logs
+  log_format: "json" # json, text, or silent

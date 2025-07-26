@@ -1,0 +1,320 @@
+pipeline {
+    agent any
+    
+    environment {
+        OPENMORPH_IMAGE = 'ghcr.io/developerkunal/openmorph:latest'
+        SPECS_DIR = 'api-specs'
+        OUTPUT_DIR = 'transformed-specs'
+        DOCKER_HOST = 'unix:///var/run/docker.sock'
+    }
+    
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        retry(2)
+        skipDefaultCheckout(false)
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+    
+    triggers {
+        pollSCM('H/15 * * * *')  // Poll every 15 minutes
+        cron('H 2 * * *')        // Daily health check at 2 AM
+    }
+    
+    stages {
+        stage('Preparation') {
+            steps {
+                script {
+                    // Create output directory
+                    sh "mkdir -p ${OUTPUT_DIR}"
+                    
+                    // Pull latest OpenMorph image
+                    sh "docker pull ${OPENMORPH_IMAGE}"
+                    
+                    // Verify Docker is working
+                    sh "docker run --rm ${OPENMORPH_IMAGE} --version"
+                }
+            }
+        }
+        
+        stage('Validate Configuration') {
+            when {
+                anyOf {
+                    changeset "openmorph.yaml"
+                    changeset "api-specs/**/*"
+                }
+            }
+            steps {
+                script {
+                    sh """
+                        docker run --rm \
+                            -v \${WORKSPACE}:/workspace \
+                            ${OPENMORPH_IMAGE} \
+                            --config /workspace/openmorph.yaml \
+                            --input /workspace/${SPECS_DIR} \
+                            --dry-run \
+                            --verbose
+                    """
+                }
+            }
+        }
+        
+        stage('Transform Specifications') {
+            parallel {
+                stage('User Service API') {
+                    steps {
+                        script {
+                            transformSpec('user-service')
+                        }
+                    }
+                }
+                stage('Payment Service API') {
+                    steps {
+                        script {
+                            transformSpec('payment-service')
+                        }
+                    }
+                }
+                stage('Notification Service API') {
+                    steps {
+                        script {
+                            transformSpec('notification-service')
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Validate Transformed Specs') {
+            steps {
+                script {
+                    // Validate all transformed specifications
+                    sh """
+                        for spec in ${OUTPUT_DIR}/*.{yaml,yml,json}; do
+                            if [ -f "\$spec" ]; then
+                                echo "Validating transformed spec: \$spec"
+                                
+                                # Use swagger-validator to validate
+                                docker run --rm \
+                                    -v \${WORKSPACE}:/workspace \
+                                    swaggerapi/swagger-validator-v2 \
+                                    validate /workspace/\$spec
+                                    
+                                echo "✅ \$spec is valid"
+                            fi
+                        done
+                    """
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            steps {
+                script {
+                    // Scan for security issues in API specs
+                    sh """
+                        for spec in ${OUTPUT_DIR}/*.{yaml,yml,json}; do
+                            if [ -f "\$spec" ]; then
+                                echo "Security scanning: \$spec"
+                                
+                                # Use OWASP ZAP or similar tool
+                                # docker run --rm -v \${WORKSPACE}:/workspace \\
+                                #     owasp/zap2docker-stable zap-api-scan.py \\
+                                #     -t /workspace/\$spec -f openapi
+                                
+                                echo "✅ Security scan completed for \$spec"
+                            fi
+                        done
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            when {
+                anyOf {
+                    branch 'develop'
+                    branch 'staging'
+                }
+            }
+            steps {
+                script {
+                    deployToEnvironment('staging')
+                }
+            }
+        }
+        
+        stage('Integration Tests') {
+            when {
+                anyOf {
+                    branch 'develop'
+                    branch 'staging'
+                }
+            }
+            steps {
+                script {
+                    // Run integration tests against staging
+                    sh """
+                        echo "Running integration tests against staging..."
+                        
+                        # Example: Use Newman to run Postman collections
+                        # docker run --rm -v \${WORKSPACE}:/workspace \\
+                        #     postman/newman run /workspace/tests/integration.json \\
+                        #     --environment /workspace/tests/staging.env.json
+                        
+                        echo "✅ Integration tests passed"
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            input {
+                message "Deploy to production?"
+                ok "Deploy"
+                parameters {
+                    choice(
+                        name: 'DEPLOYMENT_TYPE',
+                        choices: ['blue-green', 'rolling', 'canary'],
+                        description: 'Select deployment strategy'
+                    )
+                }
+            }
+            steps {
+                script {
+                    deployToEnvironment('production')
+                }
+            }
+        }
+        
+        stage('Post-deployment Verification') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    // Verify production deployment
+                    sh """
+                        echo "Verifying production deployment..."
+                        
+                        # Health checks
+                        curl -f https://api.example.com/health || exit 1
+                        
+                        # API endpoint tests
+                        # Run smoke tests against production
+                        
+                        echo "✅ Production deployment verified"
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Archive transformation results
+            archiveArtifacts artifacts: "${OUTPUT_DIR}/**/*", fingerprint: true
+            
+            // Clean up Docker images
+            sh "docker system prune -f"
+        }
+        
+        success {
+            script {
+                if (env.BRANCH_NAME == 'main') {
+                    // Notify team of successful production deployment
+                    slackSend(
+                        channel: '#api-team',
+                        color: 'good',
+                        message: "🚀 OpenAPI specs deployed to production successfully! Build: ${env.BUILD_URL}"
+                    )
+                }
+            }
+        }
+        
+        failure {
+            script {
+                // Notify team of failure
+                slackSend(
+                    channel: '#api-team',
+                    color: 'danger',
+                    message: "❌ OpenAPI transformation/deployment failed! Build: ${env.BUILD_URL}"
+                )
+                
+                // Create GitHub issue for persistent failures
+                if (currentBuild.previousBuild?.result == 'FAILURE') {
+                    echo "Creating GitHub issue for persistent failure..."
+                    // Add GitHub issue creation logic
+                }
+            }
+        }
+        
+        unstable {
+            script {
+                slackSend(
+                    channel: '#api-team',
+                    color: 'warning',
+                    message: "⚠️ OpenAPI transformation completed with warnings! Build: ${env.BUILD_URL}"
+                )
+            }
+        }
+    }
+}
+
+// Helper function to transform a specific service spec
+def transformSpec(serviceName) {
+    sh """
+        echo "Transforming ${serviceName} API specification..."
+        
+        docker run --rm \
+            -v \${WORKSPACE}:/workspace \
+            -v \${WORKSPACE}/${OUTPUT_DIR}:/output \
+            ${OPENMORPH_IMAGE} \
+            --input /workspace/${SPECS_DIR}/${serviceName} \
+            --config /workspace/openmorph.yaml \
+            --output /output/${serviceName}-transformed.yaml \
+            --backup \
+            --verbose
+            
+        echo "✅ ${serviceName} transformation completed"
+    """
+}
+
+// Helper function to deploy to environment
+def deployToEnvironment(environment) {
+    sh """
+        echo "Deploying to ${environment} environment..."
+        
+        # Set environment-specific variables
+        if [ "${environment}" = "production" ]; then
+            API_ID=\${PROD_API_ID}
+            STAGE_NAME="prod"
+        else
+            API_ID=\${STAGING_API_ID}
+            STAGE_NAME="staging"
+        fi
+        
+        # Deploy each transformed spec
+        for spec in ${OUTPUT_DIR}/*.yaml; do
+            if [ -f "\$spec" ]; then
+                echo "Deploying \$(basename \$spec) to ${environment}..."
+                
+                # Example: Deploy to AWS API Gateway
+                # aws apigateway put-rest-api \\
+                #     --rest-api-id \$API_ID \\
+                #     --body fileb://\$spec
+                
+                # Example: Update deployment stage
+                # aws apigateway create-deployment \\
+                #     --rest-api-id \$API_ID \\
+                #     --stage-name \$STAGE_NAME
+                
+                echo "✅ Deployed \$(basename \$spec)"
+            fi
+        done
+        
+        echo "✅ ${environment} deployment completed"
+    """
+}

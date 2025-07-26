@@ -1,0 +1,91 @@
+# .dockerignore
+# Docker build context exclusions for optimal build performance and security
+
+# Git and version control
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Build artifacts and binaries
+openmorph
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/build/
+/dist/
+
+# Development and testing
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Go specific
+vendor/
+*.mod.backup
+*.sum.backup
+
+# Documentation and examples
+*.md
+docs/
+examples/
+/templates/
+
+# CI/CD and deployment
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+Jenkinsfile
+docker-compose*.yml
+*.dockerfile
+Dockerfile.*
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+/tmp/
+/logs/
+
+# Test files and coverage
+*_test.go
+*.coverage
+coverage.out
+*.prof
+
+# Development scripts and tools
+scripts/
+tools/
+Makefile
+*.sh
+
+# Package manager files (keep go.mod and go.sum)
+package*.json
+yarn.lock
+Pipfile*
+requirements*.txt
+
+# Configuration files (exclude sensitive configs)
+.env*
+*.yaml.bak
+*.yml.bak
+*.json.bak
+config.local.*
+
+# Release and distribution
+.goreleaser.yml
+.version
+VERSION*
+CHANGELOG*
+AUTO_RELEASE_GUIDE.md
+PRODUCTION_READINESS.md
+VERSION_MANAGEMENT.md

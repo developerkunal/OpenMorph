@@ -1,0 +1,86 @@
+# Alternative Dockerfile using distroless with Node.js for swagger-cli
+# This provides a security-focused base with Node.js for validation capabilities
+
+# Build stage for Node.js and swagger-cli installation
+FROM docker.io/library/node:22-alpine AS nodejs
+RUN npm install -g @apidevtools/swagger-cli
+
+# Build stage
+FROM docker.io/library/golang:1.24.4-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files first for better layer caching
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download && go mod verify
+
+# Copy source code (only what's needed for build)
+COPY main.go ./
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+# Accept version and target architecture as build arguments
+ARG VERSION=dev
+ARG TARGETARCH
+
+# Build the binary with optimizations for container usage
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -ldflags="-w -s -extldflags '-static' -X 'github.com/developerkunal/OpenMorph/cmd.version=${VERSION}'" \
+    -a -installsuffix cgo \
+    -o openmorph \
+    ./main.go
+
+# Final minimal stage - using alpine for smaller size
+FROM alpine:3.22.1
+
+# Install minimal runtime dependencies
+RUN apk add --no-cache ca-certificates nodejs npm && \
+    npm install -g @apidevtools/swagger-cli && \
+    addgroup -g 1001 -S openmorph && \
+    adduser -u 1001 -S openmorph -G openmorph
+
+# Copy certificates and timezone data from builder
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Copy the binary from builder
+COPY --from=builder /build/openmorph /usr/local/bin/openmorph
+
+# Copy swagger-cli binary with proper permissions (make it executable)
+COPY --from=nodejs --chmod=755 /usr/local/lib/node_modules/@apidevtools/swagger-cli/bin/swagger-cli.js /usr/local/bin/swagger-cli
+
+# Use non-root user 
+USER openmorph:openmorph
+
+# Set working directory
+WORKDIR /workspace
+
+# Set environment variables
+ENV PATH="/usr/local/bin:${PATH}"
+
+# Set binary as entrypoint
+ENTRYPOINT ["/usr/local/bin/openmorph"]
+
+# Default to help command
+CMD ["--help"]
+
+# Add labels for better container management
+LABEL maintainer="developerkunal" \
+      version="latest" \
+      description="OpenMorph - Transform OpenAPI vendor extension keys (Distroless)" \
+      org.opencontainers.image.title="OpenMorph Distroless" \
+      org.opencontainers.image.description="Security-focused distroless CLI tool for transforming OpenAPI vendor extension keys with swagger-cli validation" \
+      org.opencontainers.image.vendor="developerkunal" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/developerkunal/OpenMorph" \
+      org.opencontainers.image.base.name="gcr.io/distroless/nodejs22-debian12:nonroot"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/openmorph", "--version"] || exit 1

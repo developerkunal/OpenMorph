@@ -49,26 +49,76 @@ OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor
 
 ## Installation
 
-### Package Managers (Recommended)
+### Docker (Recommended for CI/CD)
+
+#### Quick Start with Docker
+
+```bash
+# Pull the latest image (automatically selects correct architecture)
+docker pull ghcr.io/developerkunal/openmorph:latest
+
+# Transform files in current directory
+docker run --rm -v $(pwd):/workspace ghcr.io/developerkunal/openmorph:latest \
+  --input /workspace --dry-run
+
+# Use with configuration file
+docker run --rm -v $(pwd):/workspace ghcr.io/developerkunal/openmorph:latest \
+  --config /workspace/openmorph.yaml --input /workspace
+```
+
+#### Docker Images Available
+
+**Production Images (Multi-platform: linux/amd64, linux/arm64):**
+
+- `ghcr.io/developerkunal/openmorph:latest` - Latest release (auto-selects platform)
+- `ghcr.io/developerkunal/openmorph:v1.0.0` - Specific version (auto-selects platform)
+- `ghcr.io/developerkunal/openmorph:v1.0` - Latest patch in v1.0.x
+- `ghcr.io/developerkunal/openmorph:v1` - Latest minor in v1.x.x
+
+**Specialized Images:**
+
+- `ghcr.io/developerkunal/openmorph:v1.0.0-distroless` - Enhanced security (~15MB)
+- `ghcr.io/developerkunal/openmorph:dev` - Development with shell access (~50MB)
+
+📖 **See [DOCKER.md](DOCKER.md) for comprehensive Docker usage guide and CI/CD integration examples.**
+
+### Package Managers
 
 #### Homebrew (macOS/Linux)
 
 ```bash
-# Add the tap
-brew tap developerkunal/openmorph
+# Install directly (recommended)
+brew install developerkunal/openmorph/openmorph
 
-# Install OpenMorph
+# Or add tap first, then install
+brew tap developerkunal/openmorph
 brew install openmorph
+
+# Verify installation
+openmorph --version
 ```
 
 #### Scoop (Windows)
 
 ```powershell
-# Add the bucket
-scoop bucket add openmorph https://github.com/developerkunal/scoop-openmorph
-
-# Install OpenMorph
+# Add the bucket and install
+scoop bucket add openmorph https://github.com/developerkunal/scoop-openmorph.git
 scoop install openmorph
+
+# Verify installation
+openmorph --version
+```
+
+### Direct Download
+
+Download pre-built binaries from [GitHub Releases](https://github.com/developerkunal/OpenMorph/releases):
+
+```bash
+# Linux/macOS example
+curl -L -o openmorph.tar.gz \
+  https://github.com/developerkunal/OpenMorph/releases/download/v1.0.0/openmorph_1.0.0_linux_amd64.tar.gz
+tar -xzf openmorph.tar.gz
+./openmorph --version
 ```
 
 ### From Source

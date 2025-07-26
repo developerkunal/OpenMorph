@@ -28,6 +28,208 @@ release:
     owner: developerkunal
     name: OpenMorph
 
+# Docker images
+dockers:
+  - image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-amd64"
+      - "ghcr.io/developerkunal/openmorph:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=TARGETARCH=amd64"
+    extra_files:
+      - go.mod
+      - go.sum
+      - main.go
+      - cmd/
+      - internal/
+  - image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-arm64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-arm64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-arm64"
+      - "ghcr.io/developerkunal/openmorph:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    goos: linux
+    goarch: arm64
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=TARGETARCH=arm64"
+    extra_files:
+      - go.mod
+      - go.sum
+      - main.go
+      - cmd/
+      - internal/
+  - image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-distroless"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-distroless"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-distroless"
+    dockerfile: Dockerfile.distroless
+    use: buildx
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=TARGETARCH=amd64"
+    extra_files:
+      - go.mod
+      - go.sum
+      - main.go
+      - cmd/
+      - internal/
+  - image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-distroless-arm64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-distroless-arm64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-distroless-arm64"
+    dockerfile: Dockerfile.distroless
+    use: buildx
+    goos: linux
+    goarch: arm64
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=TARGETARCH=arm64"
+    extra_files:
+      - go.mod
+      - go.sum
+      - main.go
+      - cmd/
+      - internal/
+
+  # Add dev variant Docker builds
+  - image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-dev-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-dev-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-dev-amd64"
+      - "ghcr.io/developerkunal/openmorph:latest-dev-amd64"
+    dockerfile: Dockerfile.dev
+    use: buildx
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=TARGETARCH=amd64"
+    extra_files:
+      - go.mod
+      - go.sum
+      - main.go
+      - cmd/
+      - internal/
+  - image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-dev-arm64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-dev-arm64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-dev-arm64"
+      - "ghcr.io/developerkunal/openmorph:latest-dev-arm64"
+    dockerfile: Dockerfile.dev
+    use: buildx
+    goos: linux
+    goarch: arm64
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--build-arg=VERSION={{.Version}}"
+      - "--build-arg=TARGETARCH=arm64"
+    extra_files:
+      - go.mod
+      - go.sum
+      - main.go
+      - cmd/
+      - internal/
+
+# Docker manifests for multi-platform support
+docker_manifests:
+  - name_template: "ghcr.io/developerkunal/openmorph:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-amd64"
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:v{{ .Major }}"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:latest"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:latest-amd64"
+      - "ghcr.io/developerkunal/openmorph:latest-arm64"
+  # Distroless multi-platform manifests
+  - name_template: "ghcr.io/developerkunal/openmorph:{{ .Tag }}-distroless"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-distroless"
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-distroless-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:v{{ .Major }}-distroless"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-distroless"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-distroless-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-distroless"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-distroless"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-distroless-arm64"
+  # Dev multi-platform manifests
+  - name_template: "ghcr.io/developerkunal/openmorph:{{ .Tag }}-dev"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-dev-amd64"
+      - "ghcr.io/developerkunal/openmorph:{{ .Tag }}-dev-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:v{{ .Major }}-dev"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-dev-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}-dev-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-dev"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-dev-amd64"
+      - "ghcr.io/developerkunal/openmorph:v{{ .Major }}.{{ .Minor }}-dev-arm64"
+  - name_template: "ghcr.io/developerkunal/openmorph:latest-dev"
+    image_templates:
+      - "ghcr.io/developerkunal/openmorph:latest-dev-amd64"
+      - "ghcr.io/developerkunal/openmorph:latest-dev-arm64"
+
 # Homebrew tap
 brews:
   - name: openmorph
