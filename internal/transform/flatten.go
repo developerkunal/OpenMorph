@@ -77,6 +77,12 @@ func processFlatteningInFile(path string, opts FlattenOptions, result *FlattenRe
 
 // processDocumentFlattening processes flattening in a document
 func processDocumentFlattening(doc, root *yaml.Node, path string, opts FlattenOptions, result *FlattenResult) (bool, error) {
+	// Validate composition structures before processing
+	if validationErrors := ValidateAndReportCompositions(root, path); validationErrors != "" {
+		// Log validation warnings but continue processing
+		fmt.Printf("⚠️  Validation warnings for %s:\n%s", path, validationErrors)
+	}
+
 	// Track component references before flattening to identify unused ones later
 	componentsBefore := extractComponentRefs(root)
 
@@ -374,45 +380,149 @@ func flattenSchemaNode(node *yaml.Node, schemaName, path string, result *Flatten
 
 	changed := false
 
-	// Check for oneOf, anyOf, allOf and try to flatten them
+	// Process composition keys (oneOf, anyOf, allOf) and other properties
 	for i := 0; i < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		value := node.Content[i+1]
 
-		switch key {
-		case "oneOf", "anyOf", "allOf":
-			if refValue := getSingleRefFromArray(value); refValue != "" {
-				// Replace the oneOf/anyOf/allOf with direct $ref
-				node.Content[i] = &yaml.Node{Kind: yaml.ScalarNode, Value: "$ref"}
-				node.Content[i+1] = &yaml.Node{Kind: yaml.ScalarNode, Value: refValue}
-
-				// Record the flattening
-				flattenedPath := fmt.Sprintf("%s.%s -> $ref: %s", schemaName, key, refValue)
-				if result.FlattenedRefs[path] == nil {
-					result.FlattenedRefs[path] = []string{}
-				}
-				result.FlattenedRefs[path] = append(result.FlattenedRefs[path], flattenedPath)
+		switch {
+		case isCompositionKey(key):
+			if processCompositionKey(node, i, key, value, schemaName, path, result) {
+				changed = true
+			}
+		case key == "properties":
+			if processPropertiesNode(value, schemaName, path, result) {
 				changed = true
 			}
 		default:
-			switch value.Kind {
-			case yaml.MappingNode:
-				// Recursively process nested objects
-				if flattenSchemaNode(value, schemaName, path, result) {
-					changed = true
-				}
-			case yaml.SequenceNode:
-				// Process arrays
-				for _, item := range value.Content {
-					if flattenSchemaNode(item, schemaName, path, result) {
-						changed = true
-					}
-				}
+			if processOtherNodes(value, schemaName, path, result) {
+				changed = true
 			}
 		}
 	}
 
 	return changed
+}
+
+// processCompositionKey handles oneOf/anyOf/allOf keys
+func processCompositionKey(parentNode *yaml.Node, keyIndex int, key string, value *yaml.Node, schemaName, path string, result *FlattenResult) bool {
+	if isEmptyComposition(value) {
+		// Handle empty composition by removing it entirely
+		handleEmptyComposition(parentNode, keyIndex, schemaName, key, path, result)
+		return true
+	}
+
+	if refValue := getSingleRefFromArray(value); refValue != "" {
+		// Replace the oneOf/anyOf/allOf with direct $ref
+		parentNode.Content[keyIndex] = &yaml.Node{Kind: yaml.ScalarNode, Value: "$ref"}
+		parentNode.Content[keyIndex+1] = &yaml.Node{Kind: yaml.ScalarNode, Value: refValue}
+
+		// Record the flattening
+		recordFlattening(result, path, fmt.Sprintf("%s.%s -> $ref: %s", schemaName, key, refValue))
+		return true
+	}
+
+	if singleSchema := getSingleSchemaFromArray(value); singleSchema != nil {
+		// Replace the oneOf/anyOf/allOf with the single inline schema
+		flattenCompositionWithInlineSchema(parentNode, keyIndex, singleSchema, schemaName, key, path, result)
+		return true
+	}
+
+	return false
+}
+
+// processPropertiesNode handles the properties section
+func processPropertiesNode(value *yaml.Node, schemaName, path string, result *FlattenResult) bool {
+	if value.Kind != yaml.MappingNode {
+		return false
+	}
+
+	changed := false
+	propertiesToRemove := []int{}
+
+	for j := 0; j < len(value.Content); j += 2 {
+		propName := value.Content[j].Value
+		propNode := value.Content[j+1]
+
+		if propNode.Kind == yaml.MappingNode {
+			propSchemaName := fmt.Sprintf("%s.properties.%s", schemaName, propName)
+			if flattenSchemaNode(propNode, propSchemaName, path, result) {
+				changed = true
+			}
+
+			// Check if property became empty after flattening
+			if len(propNode.Content) == 0 {
+				propertiesToRemove = append(propertiesToRemove, j)
+			}
+		}
+	}
+
+	// Remove empty properties (in reverse order to maintain indices)
+	if removeEmptyProperties(value, propertiesToRemove) {
+		changed = true
+	}
+
+	return changed
+}
+
+// processOtherNodes handles other node types (mappings, sequences)
+func processOtherNodes(value *yaml.Node, schemaName, path string, result *FlattenResult) bool {
+	changed := false
+
+	switch value.Kind {
+	case yaml.MappingNode:
+		// Recursively process nested objects
+		if flattenSchemaNode(value, schemaName, path, result) {
+			changed = true
+		}
+	case yaml.SequenceNode:
+		// Process arrays
+		for _, item := range value.Content {
+			if flattenSchemaNode(item, schemaName, path, result) {
+				changed = true
+			}
+		}
+	}
+
+	return changed
+}
+
+// removeEmptyProperties removes empty properties from a properties node
+func removeEmptyProperties(propertiesNode *yaml.Node, propertiesToRemove []int) bool {
+	if len(propertiesToRemove) == 0 {
+		return false
+	}
+
+	// Remove empty properties (in reverse order to maintain indices)
+	for i := len(propertiesToRemove) - 1; i >= 0; i-- {
+		propIndex := propertiesToRemove[i]
+
+		// Remove property key-value pair
+		newContent := make([]*yaml.Node, 0, len(propertiesNode.Content)-2)
+
+		// Copy content before the property
+		for k := 0; k < propIndex; k++ {
+			newContent = append(newContent, propertiesNode.Content[k])
+		}
+
+		// Copy content after the property (skip the key-value pair)
+		for k := propIndex + 2; k < len(propertiesNode.Content); k++ {
+			newContent = append(newContent, propertiesNode.Content[k])
+		}
+
+		// Replace the properties node's content
+		propertiesNode.Content = newContent
+	}
+
+	return true
+}
+
+// recordFlattening records a flattening operation in the result
+func recordFlattening(result *FlattenResult, path, flattenedPath string) {
+	if result.FlattenedRefs[path] == nil {
+		result.FlattenedRefs[path] = []string{}
+	}
+	result.FlattenedRefs[path] = append(result.FlattenedRefs[path], flattenedPath)
 }
 
 // flattenPathNode flattens oneOf/anyOf/allOf in path responses
@@ -516,4 +626,95 @@ func getSingleRefFromArray(arrayNode *yaml.Node) string {
 	}
 
 	return refValue
+}
+
+// getSingleSchemaFromArray checks if an array contains only one schema (not $ref) and returns it
+func getSingleSchemaFromArray(arrayNode *yaml.Node) *yaml.Node {
+	if arrayNode == nil || arrayNode.Kind != yaml.SequenceNode {
+		return nil
+	}
+
+	// Check if array has exactly one element
+	if len(arrayNode.Content) != 1 {
+		return nil
+	}
+
+	element := arrayNode.Content[0]
+	if element.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	// Check if the element is an inline schema (not a $ref)
+	for i := 0; i < len(element.Content); i += 2 {
+		key := element.Content[i].Value
+		if key == "$ref" {
+			// This is a $ref, not an inline schema
+			return nil
+		}
+	}
+
+	// It's an inline schema
+	return element
+}
+
+// flattenCompositionWithInlineSchema replaces oneOf/anyOf/allOf with the single inline schema
+func flattenCompositionWithInlineSchema(parentNode *yaml.Node, keyIndex int, singleSchema *yaml.Node, schemaName, compositionType, path string, result *FlattenResult) {
+	// Remove the composition key and replace with the inline schema's properties
+	// We need to merge the single schema's content into the parent node
+
+	// First, remove the composition key-value pair
+	newContent := make([]*yaml.Node, 0, len(parentNode.Content)-2+len(singleSchema.Content))
+
+	// Copy content before the composition
+	for i := 0; i < keyIndex; i++ {
+		newContent = append(newContent, parentNode.Content[i])
+	}
+
+	// Add the single schema's content (all its key-value pairs)
+	newContent = append(newContent, singleSchema.Content...)
+
+	// Copy content after the composition
+	for i := keyIndex + 2; i < len(parentNode.Content); i++ {
+		newContent = append(newContent, parentNode.Content[i])
+	}
+
+	// Replace the parent node's content
+	parentNode.Content = newContent
+
+	// Record the flattening
+	recordFlattening(result, path, fmt.Sprintf("%s.%s -> inline schema", schemaName, compositionType))
+}
+
+// isEmptyComposition checks if a composition array is empty
+func isEmptyComposition(arrayNode *yaml.Node) bool {
+	if arrayNode == nil || arrayNode.Kind != yaml.SequenceNode {
+		return false
+	}
+	return len(arrayNode.Content) == 0
+}
+
+// handleEmptyComposition removes empty composition from schema
+func handleEmptyComposition(parentNode *yaml.Node, keyIndex int, schemaName, compositionType, path string, result *FlattenResult) {
+	// Remove the empty composition key-value pair
+	newContent := make([]*yaml.Node, 0, len(parentNode.Content)-2)
+
+	// Copy content before the composition
+	for i := 0; i < keyIndex; i++ {
+		newContent = append(newContent, parentNode.Content[i])
+	}
+
+	// Copy content after the composition (skip the key-value pair)
+	for i := keyIndex + 2; i < len(parentNode.Content); i++ {
+		newContent = append(newContent, parentNode.Content[i])
+	}
+
+	// Replace the parent node's content
+	parentNode.Content = newContent
+
+	// Record the removal
+	flattenedPath := fmt.Sprintf("%s.%s -> removed (empty)", schemaName, compositionType)
+	if result.FlattenedRefs[path] == nil {
+		result.FlattenedRefs[path] = []string{}
+	}
+	result.FlattenedRefs[path] = append(result.FlattenedRefs[path], flattenedPath)
 }

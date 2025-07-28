@@ -54,14 +54,6 @@ func Dir(dir string, opts Options) ([]string, error) {
 	if opts.DryRun && len(dryRunChanges) > 0 {
 		printDryRunSummary(dryRunChanges)
 	}
-	// Debug: print all files found
-	if os.Getenv("OPENMORPH_DEBUG") == "1" {
-		println("[DEBUG] All files found:", strings.Join(allFiles, ", "))
-		// Print working directory for debug
-		if wd, err := os.Getwd(); err == nil {
-			fmt.Fprintf(os.Stderr, "[DEBUG] Current working directory: %s\n", wd)
-		}
-	}
 	return changed, err
 }
 
@@ -123,8 +115,6 @@ func processYAMLFileWithChanges(orig []byte, opts Options, path, outputPath stri
 	}
 
 	if opts.Backup && opts.OutputFile == "" {
-		absPath, _ := filepath.Abs(path + ".bak")
-		fmt.Fprintf(os.Stderr, "[DEBUG] Writing backup file: %s\n", absPath)
 		_ = os.WriteFile(path+".bak", orig, 0600)
 	}
 
