@@ -13,7 +13,7 @@
 [![Security](https://github.com/developerkunal/OpenMorph/actions/workflows/security.yml/badge.svg)](https://github.com/developerkunal/OpenMorph/actions/workflows/security.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/developerkunal/OpenMorph)](https://goreportcard.com/report/github.com/developerkunal/OpenMorph)
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/developerkunal/OpenMorph)
 ---
 
 OpenMorph is a production-grade CLI and TUI tool for transforming OpenAPI vendor extension keys across YAML/JSON files. It supports interactive review, dry-run previews, backups, robust mapping/exclusion logic, vendor-specific pagination extensions, and is designed for maintainability and extensibility.
